@@ -118,3 +118,26 @@ def test_duck_and_restore():
     assert d._apply == pytest.approx(5 / 16)  # half, on the grid
     d.set_duck(None)
     assert d._apply == pytest.approx(0.60) and d.level() == pytest.approx(0.60)
+
+
+def test_click_at_100_percent_counts_toward_the_end_but_repeats_do_not():
+    """macOS (Oct 2026 Mac capture): a click at 100% fires a burst of 5 callbacks at
+    the unchanged level. Each burst is one click up; repeats within ~5 ms are not."""
+    d, got = make(15 / 16, passthrough=True)
+    t = 100.0
+    d.on_level(1.0, ours=False, now=t)                 # 93.75 -> 100: +1
+    for i in range(4):
+        d.on_level(1.0, ours=False, now=t + 0.001 * (i + 1))   # its 4 duplicates
+    t += 0.7
+    for i in range(5):                                 # a click at the top: one burst
+        d.on_level(1.0, ours=False, now=t + 0.001 * i)
+    t += 0.7
+    d.on_level(15 / 16, ours=False, now=t)             # back down
+    assert got == [1, 1, -1]
+
+
+def test_same_level_away_from_the_ends_is_never_a_click():
+    d, got = make(0.5, passthrough=True)
+    d.on_level(0.5, ours=False, now=10.0)
+    d.on_level(0.5, ours=False, now=11.0)
+    assert got == []

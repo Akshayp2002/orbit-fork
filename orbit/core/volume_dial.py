@@ -51,6 +51,8 @@ MAX_CLICKS = 2              # one step per report; 2 only if the OS skipped a ca
 RECENTER_IDLE_S = 0.9       # quiet time before we restore the level
 EDGE_STEPS = 2              # recenter at once when this close to either end
 STALE_S = 0.8               # window after our own set in which the buds may lag behind
+BURST_S = 0.15              # repeats of one report closer than this are the same report
+EDGE_EPS = 0.004            # "at 0% / 100%"
 
 
 class LevelBackend(Protocol):
@@ -79,6 +81,7 @@ class VolumeDial:
         self._saved: float | None = None       # real listening level while ducked
         self._apply: float | None = None       # level the worker should set
         self._last_set = (0.0, None, None)     # (time, buds' level before, our level)
+        self._last_report = -1.0               # time of the last not-ours report
 
     # ---------------------------------------------------------------- lifecycle
     def start(self):
@@ -155,6 +158,7 @@ class VolumeDial:
                 self._level = level
                 return
             step = self.step
+            since, self._last_report = now - self._last_report, now
 
             t_set, before, target = self._last_set
             fresh = target is not None and now - t_set < STALE_S
@@ -181,7 +185,13 @@ class VolumeDial:
             self._level = level
             if abs(d) < CLICK_MIN * step:
                 self._from_dial = True
-                return                                                 # keyboard nudge
+                edge = 1 if level >= 1 - EDGE_EPS else -1 if level <= EDGE_EPS else 0
+                if not (edge and d == 0 and since > BURST_S and not fresh):
+                    return                                             # keyboard nudge / repeat
+                # macOS reports a click that can't move past 0% / 100% as an unchanged
+                # level (one burst per click); count it toward that end
+                trace.debug("     click at the %s end", "top" if edge > 0 else "bottom")
+                d = edge * step
             self._learn_grid(level)
             step = self.step
 
