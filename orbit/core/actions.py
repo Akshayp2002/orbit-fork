@@ -7,6 +7,7 @@ An action is written in config as "kind:argument", or a list of them run in orde
     hscroll:3            horizontal wheel notches (+ = right)
     media:play_pause     play_pause | next | previous | stop (sent to the real player)
     launch:notepad.exe   open app / file / URL
+    claude_shortcut      press the Claude shortcut set in Settings ([claude] shortcut)
     center:Claude        move the (small) foreground window with this title to the middle
                          of the screen under the cursor; waits up to 1.5 s for it to appear
     wait:300             pause (ms) between steps of a list
@@ -72,6 +73,8 @@ def _one(spec: str) -> Action:
     if kind == "wait":
         ms = float(arg or 0)
         return Action(spec, lambda e: time.sleep(ms / 1000))
+    if kind == "claude_shortcut":
+        return Action(spec, lambda e: e.out.keys(e.cfg.get("claude", {}).get("shortcut", "ctrl+alt+v")))
     if kind == "open_wheel":
         return Action(spec, lambda e: e.open_wheel())
     if kind == "tool":

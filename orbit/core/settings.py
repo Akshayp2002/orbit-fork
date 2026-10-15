@@ -8,6 +8,9 @@ small settings.json next to the user config and this module applies it on load:
                 "enabled": ["volume", "scroll"]},       # the ones switched on
       "default_tool": "volume",
       "appearance": "system",                           # system | dark | light
+      "claude_shortcut": "ctrl+alt+v",                  # Claude's Quick Entry shortcut
+      "shortcuts": [{"id": "sc1a2b", "label": "Snip", "keys": "win+shift+s"}],
+                                                        # wheel items that press a key combo
       "gestures": {"click": "media:play_pause", "double": "open_wheel",
                    "triple": "last_tool", "hold": ["keys:ctrl+alt+v", "..."]}
     }
@@ -54,6 +57,16 @@ def save(s: dict, p: Path | None = None) -> Path:
     return p
 
 
+def shortcut_tool_id(sid: str) -> str:
+    return f"shortcut_{sid}"
+
+
+def shortcut_tool(sc: dict) -> dict:
+    """A one-shot wheel item that presses a key combo when picked."""
+    return {"type": "action", "label": sc.get("label") or "Shortcut", "icon": "keyboard",
+            "run": f"keys:{sc['keys']}"}
+
+
 def gesture_action(cfg: dict, g: str):
     """What a gesture does in a (merged) config: 'open_wheel', an action string/list, or 'none'."""
     opens = cfg["gestures"].get("open_wheel", [])
@@ -73,7 +86,17 @@ def wheel_order(cfg: dict) -> tuple[list[str], list[str]]:
 def apply(cfg: dict, s: dict) -> dict:
     """cfg with settings `s` layered on. Unknown tool ids are dropped, never fatal."""
     cfg = copy.deepcopy(cfg)
+    if s.get("claude_shortcut"):
+        cfg.setdefault("claude", {})["shortcut"] = s["claude_shortcut"]
+    added = []
+    for sc in s.get("shortcuts") or []:
+        if sc.get("id") and sc.get("keys"):
+            tid = shortcut_tool_id(sc["id"])
+            cfg["tools"][tid] = shortcut_tool(sc)
+            added.append(tid)
     w = s.get("wheel") or {}
+    if added and "enabled" not in w:            # no saved order yet: new shortcuts join the wheel
+        cfg["wheel"]["items"] = [t for t in cfg["wheel"]["items"] if t in cfg["tools"]] + added
     if "enabled" in w:
         order = [t for t in w.get("order", []) if t in cfg["tools"]]
         order += [t for t in cfg["tools"] if t not in order]

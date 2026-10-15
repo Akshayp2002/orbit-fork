@@ -9,8 +9,8 @@ class SettingsTest {
     private val all = defaultTools()
     private val d = OrbitSettings.defaults(all)
 
-    @Test fun defaultsPutEveryToolOnTheWheel() {
-        assertEquals(all.map { it.id }, d.wheel(all).map { it.id })
+    @Test fun defaultsPutEveryToolButZoomAndClaudeOnTheWheel() {
+        assertEquals(all.map { it.id } - setOf("zoom", "claude"), d.wheel(all).map { it.id })
         assertEquals(setOf(Kind.DOUBLE), d.openWith())
     }
 

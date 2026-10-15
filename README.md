@@ -37,8 +37,9 @@ python -m orbit --no-elevate # everything except hold
 python -m orbit --dev        # also accept test events: python -m orbit.inject double
 ```
 Tray icon: Show wheel, Settings (wheel items on/off and order, start tool, what each press
-does, dark / light / match-system appearance; saved to `settings.json` next to your config
-and applied at once), Open config, Open
+does, dark / light / match-system appearance, your Claude Quick Entry shortcut, and custom
+**Shortcuts**: wheel items that press a key combo when you pick them and press the dial;
+saved to `settings.json` next to your config and applied at once), Open config, Open
 log, Restart, Quit; toggle "Hide Windows volume
 bar". Log: `%LOCALAPPDATA%\Orbit\orbit.log`. Brightness drives Twinkle Tray if installed.
 

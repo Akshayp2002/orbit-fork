@@ -20,11 +20,13 @@ data class OrbitSettings(
     companion object {
         val GESTURES = listOf(Kind.CLICK, Kind.DOUBLE, Kind.TRIPLE, Kind.HOLD)
         const val OPEN_WHEEL = "open_wheel"
+        /** On the list (switch them on in Customize), off the wheel until then. */
+        val HIDDEN_BY_DEFAULT = setOf("zoom", "claude")
         val APPEARANCES = listOf("system", "dark", "light")
 
         fun defaults(tools: List<Tool>) = OrbitSettings(
             order = tools.map { it.id },
-            enabled = tools.map { it.id }.toSet(),
+            enabled = tools.map { it.id }.toSet() - HIDDEN_BY_DEFAULT,
             defaultTool = "volume",
             gestures = mapOf(
                 Kind.CLICK to "media:play_pause",
@@ -61,7 +63,7 @@ data class OrbitSettings(
         val newIds = ids.filter { it !in order }
         return copy(
             order = order.filter { it in ids } + newIds,
-            enabled = enabled.filter { it in ids }.toSet() + newIds,
+            enabled = enabled.filter { it in ids }.toSet() + (newIds - HIDDEN_BY_DEFAULT),
             defaultTool = defaultTool.takeIf { it in ids } ?: ids.first(),
             appearance = appearance.takeIf { it in APPEARANCES } ?: "system",
         )

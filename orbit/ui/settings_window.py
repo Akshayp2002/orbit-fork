@@ -13,12 +13,15 @@ from typing import Callable
 
 from PySide6.QtCore import (QEasingCurve, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QUrl,
                             QVariantAnimation, Property)
-from PySide6.QtGui import (QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPen, QPixmap,
-                           QRadialGradient)
-from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
+from PySide6.QtGui import (QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QKeySequence, QPainter, QPen,
+                           QPixmap, QRadialGradient)
+from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
                                QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
+import uuid
+
 from orbit.core import settings as st
+from orbit.core import shortcuts as keys_mod
 from orbit.core import tools as tools_mod
 from orbit.ui import assets
 
@@ -343,6 +346,80 @@ class _ComboRow(QFrame):
         h.addWidget(box)
 
 
+class KeyField(QLineEdit):
+    """A key combo field: press a chord (with Ctrl / Alt / Cmd / Win, or an F-key) to
+    record it, or type it ("win+shift+s": the OS grabs some Win combos before any app
+    sees them). Holds Orbit's combo format."""
+
+    _RECORD_ALWAYS = {Qt.Key_Print, Qt.Key_Insert, Qt.Key_Pause, Qt.Key_ScrollLock} | {
+        getattr(Qt, f"Key_F{i}") for i in range(1, 25)}
+    _MODIFIERS = {Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta, Qt.Key_AltGr}
+
+    def __init__(self, combo: str, on_change: Callable[[], None]):
+        super().__init__(combo)
+        self.on_change = on_change
+        self.setPlaceholderText("Press keys or type, e.g. ctrl+shift+s")
+        self.setToolTip("Press the shortcut to record it, or type it")
+        self.setFixedWidth(250)
+        self.editingFinished.connect(self._tidy)
+        self.textEdited.connect(lambda _: self.on_change())
+
+    def keyPressEvent(self, e):
+        k, mods = e.key(), e.modifiers()
+        chord = mods & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)
+        if k in self._MODIFIERS:
+            return
+        if chord or k in self._RECORD_ALWAYS:
+            seq = QKeySequence(e.keyCombination()).toString(QKeySequence.PortableText)
+            combo = keys_mod.from_qt(seq)
+            if combo:
+                self.setText(combo)
+                self.on_change()
+            return
+        super().keyPressEvent(e)
+
+    def _tidy(self):
+        t = "+".join(p.strip().lower() for p in self.text().split("+") if p.strip())
+        if t != self.text():
+            self.setText(t)
+            self.on_change()
+
+    def combo(self) -> str:
+        return "+".join(p.strip().lower() for p in self.text().split("+") if p.strip())
+
+
+class _ShortcutRow(QFrame):
+    def __init__(self, win: "SettingsWindow", sc: dict):
+        super().__init__()
+        self.sid = sc["id"]
+        self.setObjectName("row")
+        h = QHBoxLayout(self)
+        h.setContentsMargins(16, 8, 8, 8)
+        h.setSpacing(10)
+        ic = QLabel()
+        ic.setPixmap(_icon("keyboard", INK2).pixmap(18, 18))
+        ic.setFixedWidth(22)
+        h.addWidget(ic)
+        self.label = QLineEdit(sc.get("label", ""))
+        self.label.setPlaceholderText("Name on the wheel")
+        self.label.setObjectName("plain")
+        self.label.textEdited.connect(lambda _: win.shortcut_renamed(self.sid))
+        h.addWidget(self.label, 1)
+        self.keys = KeyField(sc.get("keys", ""), lambda: win.changed())
+        h.addWidget(self.keys)
+        rm = QToolButton()
+        rm.setObjectName("move")
+        rm.setIcon(_icon("x", INK2))
+        rm.setIconSize(QSize(16, 16))
+        rm.setToolTip("Remove this shortcut")
+        rm.setCursor(Qt.PointingHandCursor)
+        rm.clicked.connect(lambda: win.remove_shortcut(self.sid))
+        h.addWidget(rm)
+
+    def value(self) -> dict:
+        return {"id": self.sid, "label": self.label.text().strip() or "Shortcut", "keys": self.keys.combo()}
+
+
 # ---------------------------------------------------------------- window
 class SettingsWindow(QWidget):
     """`base_cfg`: config.toml merged for this platform, without settings.json.
@@ -357,7 +434,7 @@ class SettingsWindow(QWidget):
         self.settings_path = settings_path
         self.has_hold = has_hold
         merged = st.apply(base_cfg, current)
-        self.tools = {tid: tools_mod.build(tid, tc) for tid, tc in base_cfg["tools"].items()}
+        self.tools = {tid: tools_mod.build(tid, tc) for tid, tc in merged["tools"].items()}
         self.order, enabled = st.wheel_order(merged)
 
         self.setWindowTitle("Orbit settings")
@@ -433,6 +510,27 @@ class SettingsWindow(QWidget):
         v.addWidget(self.items_group)
 
         v.addSpacing(34)
+        v.addWidget(self._heading("Shortcuts"))
+        v.addSpacing(4)
+        v.addWidget(self._help("Wheel items that press a key combo. Pick one on the wheel and press the dial "
+                               "to send it to the app you're in."))
+        v.addSpacing(14)
+        self.sc_group = _Group()
+        self.sc_rows: dict[str, _ShortcutRow] = {}
+        for sc in current.get("shortcuts") or []:
+            if sc.get("id"):
+                self._add_shortcut_row(sc)
+        add = QPushButton("  Add shortcut")
+        add.setObjectName("quiet")
+        add.setIcon(_icon("plus", INK2))
+        add.setIconSize(QSize(14, 14))
+        add.setCursor(Qt.PointingHandCursor)
+        add.clicked.connect(self.add_shortcut)
+        self.sc_group.box.addWidget(add, 0, Qt.AlignLeft)
+        self.sc_group.restyle()
+        v.addWidget(self.sc_group)
+
+        v.addSpacing(34)
         v.addWidget(self._heading("Look"))
         v.addSpacing(4)
         v.addWidget(self._help("The highlighted item lights up the wheel around it."))
@@ -477,6 +575,31 @@ class SettingsWindow(QWidget):
             dial.box.addWidget(row)
         dial.restyle()
         v.addWidget(dial)
+
+        v.addSpacing(34)
+        v.addWidget(self._heading("Claude"))
+        v.addSpacing(4)
+        v.addWidget(self._help("The Quick Entry shortcut you set in Claude > Settings > Keyboard shortcuts. "
+                               "Press and hold uses it to open Claude dictation."))
+        v.addSpacing(14)
+        claude = _Group()
+        self.claude_keys = KeyField(merged.get("claude", {}).get("shortcut", "ctrl+alt+v"), lambda: self.changed())
+        crow = QFrame()
+        crow.setObjectName("row")
+        ch = QHBoxLayout(crow)
+        ch.setContentsMargins(16, 8, 10, 8)
+        ch.setSpacing(12)
+        lead = QLabel()
+        lead.setPixmap(_icon("claude", INK2).pixmap(16, 16))
+        lead.setFixedWidth(28)
+        ch.addWidget(lead)
+        lab = QLabel("Quick Entry shortcut")
+        lab.setFont(_font(14, QFont.DemiBold))
+        ch.addWidget(lab, 1)
+        ch.addWidget(self.claude_keys)
+        claude.box.addWidget(crow)
+        claude.restyle()
+        v.addWidget(claude)
         v.addSpacing(10)
         self.note = QLabel()
         self.note.setObjectName("warn")
@@ -540,7 +663,11 @@ class SettingsWindow(QWidget):
         values = [v for _, v in PRESETS]
         if from_config not in values:
             steps = len(from_config) if isinstance(from_config, list) else 1
-            box.addItem("Your config's action" + (f" · {steps} steps" if steps > 1 else ""), from_config)
+            if "claude_shortcut" in (from_config if isinstance(from_config, list) else [from_config]):
+                name = "Open Claude dictation"
+            else:
+                name = "Your config's action" + (f" · {steps} steps" if steps > 1 else "")
+            box.addItem(name, from_config)
             box.setItemData(box.count() - 1, _summary(from_config) if not isinstance(from_config, list)
                             else "\n".join(map(str, from_config)), Qt.ToolTipRole)
         for label, val in PRESETS:
@@ -567,6 +694,48 @@ class SettingsWindow(QWidget):
         self.items_group.restyle()
         self.changed()
 
+    def _add_shortcut_row(self, sc: dict) -> _ShortcutRow:
+        row = _ShortcutRow(self, sc)
+        self.sc_rows[sc["id"]] = row
+        self.sc_group.box.insertWidget(len(self.sc_rows) - 1, row)
+        return row
+
+    def add_shortcut(self):
+        sc = {"id": uuid.uuid4().hex[:6], "label": "Shortcut", "keys": ""}
+        row = self._add_shortcut_row(sc)
+        self.sc_group.restyle()
+        tid = st.shortcut_tool_id(sc["id"])
+        self.tools[tid] = tools_mod.build(tid, st.shortcut_tool({**sc, "keys": "none"}))
+        self.order.append(tid)
+        t = self.tools[tid]
+        self.rows[tid] = _ToolRow(self, tid, t.label, t.icon, t.sticky, True)
+        self.items_group.box.addWidget(self.rows[tid])
+        self.items_group.restyle()
+        row.label.setFocus()
+        row.label.selectAll()
+        self.changed()
+
+    def shortcut_renamed(self, sid: str):
+        tid = st.shortcut_tool_id(sid)
+        name = self.sc_rows[sid].value()["label"]
+        if tid in self.tools:
+            self.tools[tid].label = name
+            self.rows[tid].name.setText(name)
+        self.changed()
+
+    def remove_shortcut(self, sid: str):
+        row = self.sc_rows.pop(sid)
+        row.setParent(None)
+        row.deleteLater()
+        tid = st.shortcut_tool_id(sid)
+        if tid in self.rows:
+            self.rows.pop(tid).setParent(None)
+            self.order.remove(tid)
+            self.tools.pop(tid, None)
+        self.sc_group.restyle()
+        self.items_group.restyle()
+        self.changed()
+
     # ------------------------------------------------------------------ state
     def collect(self) -> dict:
         enabled = [t for t in self.order if self.rows[t].switch.isChecked()]
@@ -575,6 +744,8 @@ class SettingsWindow(QWidget):
             "default_tool": self.start.currentData(),
             "appearance": self.appearance_box.currentData(),
             "gestures": {g: b.currentData() for g, b in self.gesture_boxes.items() if b.isEnabled()},
+            "claude_shortcut": self.claude_keys.combo() or "ctrl+alt+v",
+            "shortcuts": [r.value() for r in self.sc_rows.values()],
         }
 
     def changed(self):
@@ -596,6 +767,9 @@ class SettingsWindow(QWidget):
             problems.append(f"{len(on)} items is too many to pick by feel. Keep it to {MAX_ITEMS} or fewer; 8 reads best.")
         if not opens:
             problems.append("No gesture opens the wheel, so a triple press will.")
+        blank = [sc["label"] for sc in s["shortcuts"] if not sc["keys"]]
+        if blank:
+            problems.append("Set the keys for: " + ", ".join(blank) + " (shortcuts without keys aren't saved).")
         self.note.setText("\n".join(problems))
         self.note.setVisible(bool(problems))
         self.save_btn.setEnabled(0 < len(on) <= MAX_ITEMS)
@@ -628,6 +802,12 @@ class SettingsWindow(QWidget):
         QToolButton#move {{ background: transparent; border: none; border-radius: 6px; padding: 3px; }}
         QToolButton#move:hover {{ background: #262A34; }}
         QToolButton#move:focus {{ border: 1px solid {a}; }}
+        QLineEdit {{ background: #20242D; border: 1px solid #2D323D; border-radius: 8px; padding: 6px 10px;
+                     font-size: 13px; selection-background-color: {a}; selection-color: #0B0D12; }}
+        QLineEdit:focus {{ border-color: {a}; }}
+        QLineEdit#plain {{ background: transparent; border: 1px solid transparent; font-weight: 600; font-size: 14px; }}
+        QLineEdit#plain:hover {{ border-color: #2D323D; }}
+        QLineEdit#plain:focus {{ border-color: {a}; background: #20242D; }}
         QComboBox {{ background: #20242D; border: 1px solid #2D323D; border-radius: 8px;
                      padding: 6px 10px; font-size: 13px; }}
         QComboBox:hover {{ border-color: #3B4150; }}

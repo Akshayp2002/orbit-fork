@@ -18,16 +18,21 @@ click  = "media:play_pause"
 triple = "last_tool"        # flip between the two most recent tools
 # hold: open Claude Quick Entry (same key as in Claude > Settings > Keyboard shortcuts),
 # bring it to the middle of the screen you're on, then start Windows voice typing into it.
-hold   = ["keys:ctrl+alt+v", "center:Claude", "wait:250", "keys:win+h"]
+hold   = ["claude_shortcut", "center:Claude", "wait:250", "keys:win+h"]
 # Gestures that open the wheel (they win over any tool binding). Inside the wheel,
 # double / triple / hold close it without changing anything.
 open_wheel = ["double"]
 # Used if none of the above can be read (e.g. only "hold" listed and not running as admin).
 open_wheel_fallback = "triple"
 
+[claude]
+# The Quick Entry shortcut set in Claude > Settings > Keyboard shortcuts. Also editable in
+# Orbit's Settings window. "claude_shortcut" in any action presses it.
+shortcut = "ctrl+alt+v"
+
 [wheel]
 # Clockwise order, starting at 12 o'clock. 8 or fewer reads best on a dial.
-items = ["volume", "brightness", "switcher", "scroll", "zoom", "undo", "desktops", "tabs", "voice"]
+items = ["volume", "brightness", "switcher", "scroll", "undo", "desktops", "tabs", "voice"]   # zoom: off by default
 dismiss_after_ms = 5000
 duck_volume = 0.5           # audio drops to this fraction while the wheel is open (1 = off)
 accel = 1                   # 1 = one item per click. 2 = fast reports move 2 (can skip one on quick deliberate clicks)

@@ -19,6 +19,7 @@ DEFAULTS: dict = {
     "ui": {"hud_ms": 1400, "scale": 1.0, "accent": "#7C9CFF", "hide_os_volume_flyout": True,
            "appearance": "dark"},
     "tools": {},
+    "claude": {"shortcut": "ctrl+alt+v"},
 }
 
 APPEARANCES = ("system", "dark", "light")
