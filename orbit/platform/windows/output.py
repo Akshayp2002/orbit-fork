@@ -164,6 +164,41 @@ class WindowsOutput(Output):
         # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
         user32.SetWindowPos(h, 0, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010)
 
+    def press_app_button(self, app_title: str, name_pattern: str):
+        """Bring an app's main window forward and press a button in it by its accessible
+        name (UI Automation, like a screen reader). Runs off the UI thread."""
+        threading.Thread(target=self._press_app_button, args=(app_title, name_pattern), daemon=True).start()
+
+    def _press_app_button(self, app_title, name_pattern):
+        import re
+
+        import uiautomation as auto
+
+        with auto.UIAutomationInitializerInThread():
+            wins = [w for w in auto.GetRootControl().GetChildren()
+                    if w.Name == app_title and w.ClassName == "Chrome_WidgetWin_1"]
+            if not wins:
+                log.info("press_app_button: no '%s' window", app_title)
+                return
+            main = max(wins, key=lambda w: w.BoundingRectangle.width() * w.BoundingRectangle.height())
+            h = main.NativeWindowHandle
+            if user32.IsIconic(h):
+                user32.ShowWindow(h, 9)  # SW_RESTORE
+            # Alt tap lets a background process take foreground (foreground-lock rule)
+            _send(_key(VK["alt"]), _key(VK["alt"], True))
+            user32.SetForegroundWindow(h)
+            rx = re.compile(name_pattern, re.I)
+            btn = main.ButtonControl(searchDepth=60, Compare=lambda c, d: bool(rx.search(c.Name or "")))
+            if not btn.Exists(maxSearchSeconds=1.5):
+                log.info("press_app_button: no button matching %r in %s", name_pattern, app_title)
+                return
+            try:
+                btn.GetInvokePattern().Invoke()
+                log.info("pressed '%s' in %s", btn.Name, app_title)
+            except Exception:
+                btn.Click(simulateMove=False)
+                log.info("clicked '%s' in %s", btn.Name, app_title)
+
     def active_window_title(self):
         h = user32.GetForegroundWindow()
         n = user32.GetWindowTextLengthW(h)

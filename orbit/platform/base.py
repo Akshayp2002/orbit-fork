@@ -79,6 +79,9 @@ class Output(ABC):
     def active_window_title(self) -> str:
         return ""
 
+    def press_app_button(self, app_title: str, name_pattern: str) -> None:
+        """Bring an app forward and press a button in it by accessible name."""
+
     def center_window(self, title: str) -> None:
         """Move the small foreground window called `title` to the middle of the cursor's screen."""
 

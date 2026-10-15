@@ -10,6 +10,8 @@ An action is written in config as "kind:argument", or a list of them run in orde
     center:Claude        move the (small) foreground window with this title to the middle
                          of the screen under the cursor; waits up to 1.5 s for it to appear
     wait:300             pause (ms) between steps of a list
+    button:Claude|record bring the app window called "Claude" forward and press the button
+                         whose accessible name matches the regex after "|"
     open_wheel           open the wheel menu
     tool:<id>            switch the active tool
     last_tool            flip back to the previous tool
@@ -62,6 +64,9 @@ def _one(spec: str) -> Action:
         return Action(spec, lambda e: e.out.media(arg))
     if kind == "launch":
         return Action(spec, lambda e: e.out.launch(arg))
+    if kind == "button":
+        app, _, pattern = arg.partition("|")
+        return Action(spec, lambda e: e.out.press_app_button(app.strip(), pattern.strip()))
     if kind == "center":
         return Action(spec, lambda e: e.out.center_window(arg))
     if kind == "wait":

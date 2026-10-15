@@ -49,7 +49,10 @@ class Decoder:
 
 
 DECODERS = [
-    Decoder("hfp-voice-recognition", lambda d: b"AT+BVRA=1" in d, Kind.HOLD),
+    # The buds toggle their own idea of "voice recognition active": a hold sends BVRA=1,
+    # but after anything opens the headset mic (call audio, AT+BCS) the next holds send
+    # BVRA=0. Both mean "the user held the dial".
+    Decoder("hfp-voice-recognition", lambda d: b"AT+BVRA=1" in d or b"AT+BVRA=0" in d, Kind.HOLD),
 ]
 
 
