@@ -28,8 +28,21 @@ jobs:
       - name: macOS API smoke test
         if: runner.os == 'macOS'
         run: python -u tools/mac_smoke.py
+      - name: Full app starts and handles injected dial events
+        run: python -u tools/startup_check.py
+      - name: Build Orbit.app
+        if: runner.os == 'macOS'
+        run: |
+          python -m pip install pyinstaller
+          bash packaging/mac/build_app.sh
+          ditto -c -k --keepParent dist/Orbit.app Orbit-macos.zip
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: overlay-${{ matrix.os }}
           path: overlay-*.png
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'macOS'
+        with:
+          name: Orbit-macos
+          path: Orbit-macos.zip

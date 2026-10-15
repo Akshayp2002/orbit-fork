@@ -44,6 +44,13 @@ def find(explicit: str | None) -> Path:
     for p in (Path(explicit) if explicit else None, user_config_path(), PROJECT_CONFIG):
         if p and p.exists():
             return p
+    # packaged app (PyInstaller): ship the default, copy it where the user can edit it
+    bundled = Path(getattr(sys, "_MEIPASS", "")) / "config.toml"
+    if bundled.exists():
+        dest = user_config_path()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(bundled.read_bytes())
+        return dest
     raise FileNotFoundError("no config.toml found (looked in --config, user dir, project dir)")
 
 
