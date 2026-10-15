@@ -90,6 +90,35 @@ def test_reverse_brakes_momentum():
     assert -1.3 < sum(after) < -0.7    # and the correction is one precise click
 
 
+class _BrightOut(FakeOut):
+    def __init__(self):
+        super().__init__()
+        self.level = 40.0
+        self.writes = []
+
+    def brightness_get(self):
+        return self.level
+
+    def brightness_set(self, v):
+        time.sleep(0.1)                # DDC/CI is slow
+        self.writes.append(v)
+
+
+def test_brightness_steps_clamps_and_coalesces():
+    from orbit.core.tools import BrightnessTool
+    t, e = BrightnessTool("b", {"step": 5}), _E()
+    e.out = _BrightOut()
+    t.enter(e)
+    time.sleep(0.05)
+    h = t.rotate(e, 1)
+    assert h.detail == "45%" and abs(h.progress - 0.45) < 1e-9
+    for _ in range(30):                # a burst far past 100
+        t.rotate(e, 1)
+    time.sleep(0.5)
+    assert e.out.writes[-1] == 100     # clamped, newest value wins
+    assert len(e.out.writes) < 10      # slow writes coalesced, no backlog
+
+
 def test_wheel_ducks_and_restores():
     e, out, ui, rot = make()
     e.handle(ev(Kind.DOUBLE))

@@ -164,6 +164,26 @@ class WindowsOutput(Output):
         # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
         user32.SetWindowPos(h, 0, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010)
 
+    # ---------------- brightness (via Twinkle Tray, so its slider stays in sync)
+    TWINKLE = os.path.expandvars(r"%LOCALAPPDATA%\Programs\twinkle-tray\Twinkle Tray.exe")
+
+    def _twinkle(self, *args) -> str:
+        import subprocess
+        if not os.path.exists(self.TWINKLE):
+            return ""
+        r = subprocess.run([self.TWINKLE, *args], capture_output=True, text=True, timeout=5,
+                           creationflags=0x08000000)  # CREATE_NO_WINDOW
+        return r.stdout
+
+    def brightness_get(self):
+        import re
+        out = re.sub(r"\x1b\[[0-9;]*m", "", self._twinkle("--List"))
+        vals = [int(v) for v in re.findall(r"Brightness:\s*(\d+)", out)]
+        return sum(vals) / len(vals) if vals else None
+
+    def brightness_set(self, value):
+        self._twinkle("--All", f"--Set={int(round(value))}")
+
     def press_app_button(self, app_title: str, name_pattern: str):
         """Bring an app's main window forward and press a button in it by its accessible
         name (UI Automation, like a screen reader). Runs off the UI thread."""

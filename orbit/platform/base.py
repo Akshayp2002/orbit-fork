@@ -79,6 +79,13 @@ class Output(ABC):
     def active_window_title(self) -> str:
         return ""
 
+    def brightness_get(self) -> float | None:
+        """Display brightness 0..100, or None if not controllable. May take ~150 ms."""
+        return None
+
+    def brightness_set(self, value: float) -> None:
+        """Set display brightness 0..100 (blocking; callers coalesce)."""
+
     def press_app_button(self, app_title: str, name_pattern: str) -> None:
         """Bring an app forward and press a button in it by accessible name."""
 

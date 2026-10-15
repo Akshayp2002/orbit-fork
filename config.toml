@@ -27,7 +27,7 @@ open_wheel_fallback = "triple"
 
 [wheel]
 # Clockwise order, starting at 12 o'clock. 8 or fewer reads best on a dial.
-items = ["volume", "switcher", "scroll", "zoom", "undo", "desktops", "tabs", "voice"]
+items = ["volume", "brightness", "switcher", "scroll", "zoom", "undo", "desktops", "tabs", "voice"]
 dismiss_after_ms = 5000
 duck_volume = 0.5           # audio drops to this fraction while the wheel is open (1 = off)
 on_timeout = "select"       # "select": keep the highlighted tool; "cancel": keep the old one
@@ -44,6 +44,13 @@ type = "volume"
 label = "Volume"
 icon = "volume"
 triple = "media:next"
+
+[tools.brightness]
+type = "brightness"        # drives Twinkle Tray, so its slider stays in sync
+label = "Brightness"
+icon = "brightness"
+step = 5                   # % per careful click
+max_gain = 3               # fast spins move up to this many times further
 
 [tools.switcher]
 type = "window_switcher"

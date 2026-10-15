@@ -186,6 +186,70 @@ class SmoothScrollTool(Tool):
                 self._out.scroll(send / 120, horizontal=self.horizontal)
 
 
+class BrightnessTool(Tool):
+    """Display brightness. Each detent moves `step`%, fast spins further. Monitor
+    writes are slow (DDC/CI ~100 ms), so a writer thread always sends only the
+    newest target: a fast spin never queues up stale writes."""
+
+    def __init__(self, tid, cfg):
+        super().__init__(tid, cfg)
+        self.step = float(cfg.get("step", 5))
+        self.max_gain = float(cfg.get("max_gain", 3))
+        self.spin = SpinTracker()
+        self._level: float | None = None
+        self._target: float | None = None
+        self._cv = threading.Condition()
+        self._out = None
+        self._writer = False
+        self._last_sync = 0.0
+
+    def enter(self, e):
+        self._out = e.out
+        if not self._writer:
+            self._writer = True
+            threading.Thread(target=self._write_loop, name="brightness", daemon=True).start()
+        threading.Thread(target=self._sync, daemon=True).start()
+
+    def _sync(self):
+        """Read the real level (the user may have moved Twinkle Tray's slider)."""
+        lvl = self._out.brightness_get() if self._out else None
+        with self._cv:
+            if lvl is not None and self._target is None:
+                self._level = lvl
+            self._last_sync = time.monotonic()
+
+    def rotate(self, e, delta):
+        if self._out is None:
+            self.enter(e)
+        if self._level is None:
+            self._sync()                       # first use: one blocking read (~150 ms)
+        if self._level is None:
+            return Hud(self.icon, self.label, "not available")
+        self.spin.update(delta)
+        change = delta * self.step * self.spin.gain(self.max_gain)
+        with self._cv:
+            self._level = min(100.0, max(0.0, self._level + change))
+            self._target = self._level
+            self._cv.notify()
+        return Hud(self.icon, self.label, f"{round(self._level)}%", self._level / 100, 1 if delta > 0 else -1)
+
+    def hud(self, e):
+        if self._level is None:
+            return Hud(self.icon, self.label)
+        return Hud(self.icon, self.label, f"{round(self._level)}%", self._level / 100)
+
+    def _write_loop(self):
+        while True:
+            with self._cv:
+                while self._target is None:
+                    self._cv.wait()
+                value, self._target = self._target, None
+            try:
+                self._out.brightness_set(value)
+            except Exception:
+                pass
+
+
 class WindowSwitcherTool(Tool):
     """Rotate = walk the native Alt+Tab list; press or pause = land on that window."""
 
@@ -240,6 +304,7 @@ TOOL_TYPES: dict[str, type[Tool]] = {
     "volume": VolumeTool,
     "keys": KeysTool,
     "smooth_scroll": SmoothScrollTool,
+    "brightness": BrightnessTool,
     "window_switcher": WindowSwitcherTool,
     "action": ActionItem,
 }

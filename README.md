@@ -2,7 +2,7 @@
 
 The case dial on the CMF Buds Pro 2 becomes a Surface-Dial-style controller:
 **double-press** to open a wheel, **turn** to pick a tool, **press** to use it. After
-that, turning and pressing drive the chosen tool (volume, scroll, zoom,
+that, turning and pressing drive the chosen tool (volume, brightness, scroll, zoom,
 window switcher, undo, desktops, tabs...). Everything is set in `config.toml`.
 
 ## Run
