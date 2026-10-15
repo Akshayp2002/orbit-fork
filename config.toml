@@ -15,10 +15,11 @@ audio_endpoint_match = "CMF Buds Pro 2"
 [gestures]
 # What presses do while a tool is active, unless that tool defines its own click/double/triple.
 click  = "media:play_pause"
-double = "last_tool"        # flip between the two most recent tools
-triple = "media:next"
-hold   = "open_wheel"
-# Used to open the wheel when press-and-hold can't be read (not running as admin).
+triple = "last_tool"        # flip between the two most recent tools
+# Gestures that open the wheel (they win over any tool binding). Inside the wheel,
+# the same gestures close it without changing anything.
+open_wheel = ["double", "hold"]
+# Used if none of the above can be read (e.g. only "hold" listed and not running as admin).
 open_wheel_fallback = "triple"
 
 [wheel]
@@ -39,8 +40,7 @@ accent = "#7C9CFF"
 type = "volume"
 label = "Volume"
 icon = "volume"
-double = "media:next"
-triple = "media:previous"
+triple = "media:next"
 
 [tools.switcher]
 type = "window_switcher"

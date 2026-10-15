@@ -54,12 +54,18 @@ class Engine:
 
         self.tools: dict[str, Tool] = {tid: tools.build(tid, tc) for tid, tc in cfg["tools"].items()}
         self.wheel_ids: list[str] = [i for i in cfg["wheel"]["items"] if i in self.tools]
-        self.gestures = {g: actions.parse(a) for g, a in cfg["gestures"].items() if g != "open_wheel_fallback"}
-        # The gesture that opens the wheel always wins over tool-level bindings.
-        self.open_with = "hold"
-        if Capability.HOLD not in caps and Capability.PRESS_RELEASE not in caps:
-            self.open_with = cfg["gestures"].get("open_wheel_fallback", "triple")
-            log.warning("no HOLD source available; wheel opens with '%s'", self.open_with)
+        g_cfg = cfg["gestures"]
+        self.gestures = {g: actions.parse(a) for g, a in g_cfg.items()
+                         if g not in ("open_wheel", "open_wheel_fallback")}
+        # Gestures that open the wheel always win over tool-level bindings.
+        opens = g_cfg.get("open_wheel", ["hold"])
+        self.open_with = {opens} if isinstance(opens, str) else set(opens)
+        has_hold = Capability.HOLD in caps or Capability.PRESS_RELEASE in caps
+        if not has_hold and "hold" in self.open_with:
+            self.open_with.discard("hold")
+            if not self.open_with:
+                self.open_with = {g_cfg.get("open_wheel_fallback", "triple")}
+            log.warning("press-and-hold unavailable; wheel opens with %s", sorted(self.open_with))
 
         self.dismiss_after = cfg["wheel"].get("dismiss_after_ms", 6000) / 1000
         self.duck = float(cfg["wheel"].get("duck_volume", 0.5))   # 0 or 1 = off
@@ -155,7 +161,7 @@ class Engine:
             return
 
         name = ev.kind.value
-        if name == self.open_with:
+        if name in self.open_with:
             self.open_wheel()
             return
         handled = self.tool.gesture(self, name)

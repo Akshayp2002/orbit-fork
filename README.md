@@ -1,7 +1,7 @@
 # Orbit — a dial + wheel menu for CMF Buds Pro 2
 
 The case dial on the CMF Buds Pro 2 becomes a Surface-Dial-style controller:
-**hold** to open a wheel, **turn** to pick a tool, **press** to use it. After
+**double-press** (or hold) to open a wheel, **turn** to pick a tool, **press** to use it. After
 that, turning and pressing drive the chosen tool (volume, scroll, zoom,
 window switcher, undo, desktops, tabs...). Everything is set in `config.toml`.
 
@@ -9,8 +9,8 @@ window switcher, undo, desktops, tabs...). Everything is set in `config.toml`.
 
 ```
 pip install -r requirements.txt
-python -m orbit              # asks for admin (needed to read press-and-hold)
-python -m orbit --no-elevate # no admin: wheel opens with a triple press instead
+python -m orbit              # asks for admin (only needed for press-and-hold)
+python -m orbit --no-elevate # no admin: everything works, hold just isn't read
 python -m orbit --dev        # also accept test events: python -m orbit.inject hold
 ```
 
@@ -23,9 +23,9 @@ Log: `%LOCALAPPDATA%\Orbit\orbit.log`.
 |---|---|---|
 | Turn | drives the tool (Volume: volume; Scroll: scrolls...) | moves the highlight, one item per click, wraps |
 | Press | tool's click, else play/pause | **select** |
-| Double press | back to the previous tool (Volume: next track) | close, no change |
-| Triple press | next track (Volume: previous track) | close, no change |
-| Hold | **open wheel** | close, no change |
+| Double press | **open wheel** | close, no change |
+| Triple press | back to the previous tool (Volume: next track) | close, no change |
+| Hold (admin) | open wheel | close, no change |
 | Wait 5 s | — | keeps the highlighted tool (one-shot actions never fire on timeout) |
 
 An on-screen tag shows the active tool and its value whenever you use the dial,

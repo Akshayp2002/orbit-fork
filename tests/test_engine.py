@@ -121,21 +121,29 @@ def test_timeout_selects_sticky_but_never_fires_action():
     assert e.tool.id == "switcher" and ("keys", "win+h") not in out.log
 
 
-def test_double_flips_last_tool():
+def test_double_opens_and_closes_wheel_from_any_tool():
+    e, out, *_ = make()
+    for tool in ("volume", "zoom", "scroll"):
+        e.set_tool(tool)
+        e.handle(ev(Kind.DOUBLE))
+        assert e.state == State.WHEEL
+        e.handle(ev(Kind.DOUBLE))
+        assert e.state == State.TOOL and e.tool.id == tool
+    assert not [x for x in out.log if x[0] == "media"]   # double never leaks to the player
+
+
+def test_triple_flips_last_tool():
     e, *_ = make()
     e.set_tool("zoom")
-    e.handle(ev(Kind.DOUBLE))
-    assert e.tool.id == "volume"
-    e.handle(ev(Kind.DOUBLE))        # volume's own double = media:next, not last_tool
+    e.handle(ev(Kind.TRIPLE))
     assert e.tool.id == "volume"
 
 
 def test_volume_tool_media_gestures():
     e, out, *_ = make()
     e.handle(ev(Kind.CLICK))
-    e.handle(ev(Kind.DOUBLE))
     e.handle(ev(Kind.TRIPLE))
-    assert [x for x in out.log if x[0] == "media"] == [("media", "play_pause"), ("media", "next"), ("media", "previous")]
+    assert [x for x in out.log if x[0] == "media"] == [("media", "play_pause"), ("media", "next")]
 
 
 def test_switcher_holds_alt_and_commits_on_click():
@@ -157,10 +165,18 @@ def test_switcher_releases_alt_when_wheel_opens():
     assert ("up", "alt") in out.log
 
 
-def test_no_hold_source_falls_back_to_triple():
+def test_no_hold_source_still_opens_with_double():
     e, *_ = make(caps=(Capability.CLICKS,))
-    e.handle(ev(Kind.TRIPLE))
+    assert e.open_with == {"double"}
+    e.handle(ev(Kind.DOUBLE))
     assert e.state == State.WHEEL
+
+
+def test_hold_only_config_falls_back_to_triple():
+    cfg, _ = config_mod.load()
+    cfg["gestures"]["open_wheel"] = ["hold"]
+    e = Engine(cfg, FakeOut(), FakeUI(), [FakeRot(), FakeSrc((Capability.CLICKS,))])
+    assert e.open_with == {"triple"}
 
 
 def test_press_release_quick_select():

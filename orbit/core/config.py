@@ -11,9 +11,8 @@ DEFAULTS: dict = {
     "device": {"audio_endpoint_match": "CMF Buds Pro 2"},
     "gestures": {
         "click": "media:play_pause",
-        "double": "media:next",
-        "triple": "media:previous",
-        "hold": "open_wheel",
+        "triple": "last_tool",
+        "open_wheel": ["double", "hold"],
         "open_wheel_fallback": "triple",
     },
     "wheel": {"items": [], "dismiss_after_ms": 6000, "duck_volume": 0.5},
@@ -73,6 +72,13 @@ def validate(cfg: dict) -> None:
     dt = cfg.get("default_tool")
     if dt and dt not in cfg["tools"]:
         raise ValueError(f"config: default_tool '{dt}' is not a tool")
-    for g, a in cfg["gestures"].items():
-        if g != "open_wheel_fallback":
+    names = {"click", "double", "triple", "hold"}
+    g_cfg = cfg["gestures"]
+    opens = g_cfg.get("open_wheel", [])
+    opens = [opens] if isinstance(opens, str) else opens
+    bad = [o for o in [*opens, g_cfg.get("open_wheel_fallback", "triple")] if o not in names]
+    if bad:
+        raise ValueError(f"config: gestures.open_wheel must use {sorted(names)}, got {bad}")
+    for g, a in g_cfg.items():
+        if g not in ("open_wheel", "open_wheel_fallback"):
             actions.parse(a)
