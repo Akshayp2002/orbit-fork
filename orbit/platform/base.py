@@ -29,6 +29,9 @@ class InputSource(ABC):
     def describe(self) -> str:
         return self.name
 
+    def observe(self, ev: InputEvent) -> None:
+        """Sees every event from every source (any thread). Lets a source self-check."""
+
 
 class RotationSource(InputSource):
     """A source whose rotation is borrowed from another OS function (e.g. volume).

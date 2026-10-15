@@ -1,6 +1,6 @@
 """Minimal real-time ETW consumer (ctypes, no deps). Needs admin.
 
-    s = EtwSession("OrbitBT", provider_guid, on_payload=lambda data: ...)
+    s = EtwSession("OrbitBT", [(guid, level, keywords), ...], on_payload=lambda data, provider: ...)
     s.start()   # spawns the processing thread
     s.stop()
 """
@@ -96,6 +96,15 @@ _INVALID = 0xFFFFFFFFFFFFFFFF
 # EVENT_RECORD (x64): EVENT_HEADER(80) + ETW_BUFFER_CONTEXT(4) + ExtendedDataCount(2) + UserDataLength(2)
 #                     + ExtendedData*(8) + UserData*(8)
 _OFF_LEN, _OFF_DATA = 86, 96
+_OFF_PROVIDER = 24  # EVENT_HEADER.ProviderId
+
+
+def stop_session(name: str) -> None:
+    """Stop a real-time session by name (no-op if it doesn't exist)."""
+    pw = _Props()
+    pw.p.Wnode.BufferSize = ctypes.sizeof(pw)
+    pw.p.LoggerNameOffset = ctypes.sizeof(EVENT_TRACE_PROPERTIES)
+    advapi.ControlTraceW(0, name, ctypes.byref(pw), 1)
 
 
 def is_admin() -> bool:
@@ -103,8 +112,10 @@ def is_admin() -> bool:
 
 
 class EtwSession:
-    def __init__(self, name: str, provider: uuid.UUID, on_payload: Callable[[bytes], None], level: int = 5):
-        self.name, self.provider, self.on_payload, self.level = name, provider, on_payload, level
+    def __init__(self, name: str, providers: list[tuple[uuid.UUID, int, int]],
+                 on_payload: Callable[[bytes, uuid.UUID], None], nonpaged: bool = False):
+        self.name, self.providers, self.on_payload = name, providers, on_payload
+        self.nonpaged = nonpaged
         self._handle = ctypes.c_uint64()
         self._trace = _INVALID
         self._cb = RECORD_CB(self._record)  # keep a reference: ctypes callbacks die with their wrapper
@@ -115,6 +126,8 @@ class EtwSession:
         pw.p.Wnode.Flags = 0x20000            # WNODE_FLAG_TRACED_GUID
         pw.p.Wnode.ClientContext = 1          # QPC clock
         pw.p.LogFileMode = 0x100              # EVENT_TRACE_REAL_TIME_MODE
+        if self.nonpaged:
+            pw.p.LogFileMode |= 0x40          # EVENT_TRACE_USE_NONPAGED_MEMORY — rejected (87) for real-time sessions
         pw.p.BufferSize = 16                  # KB, small buffers flush sooner
         pw.p.MinimumBuffers = 4
         pw.p.MaximumBuffers = 32
@@ -126,8 +139,9 @@ class EtwSession:
         n = ctypes.c_ushort.from_address(rec + _OFF_LEN).value
         ptr = ctypes.c_void_p.from_address(rec + _OFF_DATA).value
         if n and ptr:
+            prov = uuid.UUID(bytes_le=ctypes.string_at(rec + _OFF_PROVIDER, 16))
             try:
-                self.on_payload(ctypes.string_at(ptr, n))
+                self.on_payload(ctypes.string_at(ptr, n), prov)
             except Exception:
                 log.exception("payload handler failed")
 
@@ -137,11 +151,11 @@ class EtwSession:
         rc = advapi.StartTraceW(ctypes.byref(self._handle), self.name, ctypes.byref(pw))
         if rc:
             raise OSError(rc, f"StartTrace failed ({rc})")
-        g = GUID.from_uuid(self.provider)
-        rc = advapi.EnableTraceEx2(self._handle.value, ctypes.byref(g), 1, self.level, 0, 0, 0, None)
-        if rc:
-            self._control_stop()
-            raise OSError(rc, f"EnableTraceEx2 failed ({rc})")
+        for guid, level, keywords in self.providers:
+            g = GUID.from_uuid(guid)
+            rc = advapi.EnableTraceEx2(self._handle.value, ctypes.byref(g), 1, level, keywords, 0, 0, None)
+            if rc:
+                log.warning("enable %s failed (%d)", guid, rc)
         lf = EVENT_TRACE_LOGFILEW()
         lf.LoggerName = self.name
         lf.ProcessTraceMode = 0x100 | 0x10000000  # REAL_TIME | EVENT_RECORD

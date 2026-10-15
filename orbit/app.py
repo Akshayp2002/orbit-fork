@@ -116,16 +116,24 @@ def main(argv=None):
         sources.append(UdpDevSource())
     out = plat.create_output(cfg)
     ui = QtUI(cfg, assets.ensure_sounds(data_dir() / "sounds"))
-    engine = Engine(cfg, out, ui, sources)
 
+    # Start sources first so the engine sees what actually works (e.g. falls back to
+    # triple-press for the wheel when the hold sniffer can't start).
     bus = Bus()
-    bus.event.connect(engine.handle, Qt.QueuedConnection)
+
+    def post(ev: InputEvent):
+        bus.post(ev)
+        for src in sources:
+            src.observe(ev)
+
     for s in sources:
         try:
-            s.start(bus.post)
+            s.start(post)
             log.info("source up: %s%s", s.describe(), "" if s.available else " (unavailable)")
         except Exception:
             log.exception("source failed: %s", s.name)
+    engine = Engine(cfg, out, ui, sources)
+    bus.event.connect(engine.handle, Qt.QueuedConnection)
 
     ticker = QTimer()
     ticker.setInterval(50)

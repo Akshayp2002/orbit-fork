@@ -13,6 +13,7 @@ the app has to change.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -24,7 +25,19 @@ from orbit.platform.windows import etw
 
 log = logging.getLogger("orbit.bt")
 
-BTHPORT = uuid.UUID("8a1f9517-3a8c-4a9e-a018-4f17a200f277")
+ALL = 0xFFFFFFFFFFFFFFFF
+PROVIDER_NAMES = {
+    uuid.UUID("8a1f9517-3a8c-4a9e-a018-4f17a200f277"): "BTHPORT",
+    uuid.UUID("33693e1d-246a-471b-83be-3e75f47a832d"): "BTHUSB",
+    uuid.UUID("db25b328-a6f6-444f-9d97-a50e20217d16"): "BTHMINI",
+    uuid.UUID("d88ace07-cac0-11d8-a4c6-000d560bcba5"): "WPP.BthPort",
+    uuid.UUID("f1b0ec6a-87cb-4eaa-bfba-82770400a80b"): "WPP.RFCOMM",
+    uuid.UUID("f0cb5d88-0c28-475a-8ae9-d3331ed861de"): "WPP.BTHMINI",
+}
+STALE_SESSIONS = ["CMFDialHold", "OrbitDiag", "OrbitDiagA", "OrbitDiagB", "OrbitDiagC"]
+ALL_PROVIDERS = [(g, 5, ALL) for g in PROVIDER_NAMES]   # diagnostics only: ~3.5k events/s
+# Raw HCI packets (incl. the hold's AT+BVRA) come from the BTHPORT manifest provider.
+PROVIDERS = [(uuid.UUID("8a1f9517-3a8c-4a9e-a018-4f17a200f277"), 5, 0)]
 
 
 @dataclass
@@ -49,26 +62,71 @@ class BluetoothPacketSource(InputSource):
         self._emit: Emit | None = None
         self._last: dict[str, float] = {}
         self._session: etw.EtwSession | None = None
+        self._count = 0
+        self._count_t = time.monotonic()
+        self._last_packet = 0.0
+        self._last_restart = 0.0
+        self._checking = False
+
+    _failed = False
 
     @property
     def available(self):
-        return etw.is_admin()
+        return etw.is_admin() and not self._failed
 
     def start(self, emit):
         self._emit = emit
         if not self.available:
             log.warning("not admin — press-and-hold detection off")
             return
-        self._session = etw.EtwSession("OrbitDialBT", BTHPORT, self._on_payload)
-        self._session.start()
+        # A leftover session from a crash or an older tool can stop BTHPORT feeding us at all.
+        for stale in STALE_SESSIONS:
+            etw.stop_session(stale)
+        self._open()
+
+    def _open(self):
+        self._session = etw.EtwSession("OrbitDialBT", PROVIDERS, self._on_payload)
+        try:
+            self._session.start()
+        except OSError:
+            self._failed = True
+            raise
+        self._last_packet = time.monotonic()
         log.info("bluetooth packet sniffer active (%d decoders)", len(self.decoders))
 
     def stop(self):
         if self._session:
             self._session.stop()
 
-    def _on_payload(self, data: bytes):
+    def observe(self, ev):
+        """Self-check: a dial turn/press is itself Bluetooth traffic. If one arrives from
+        another source and we saw no packet around it, our session has gone deaf."""
+        if ev.source == self.name or self._session is None or self._checking:
+            return
+        self._checking = True
+        threading.Timer(1.5, self._check, args=(ev.t,)).start()
+
+    def _check(self, t):
+        self._checking = False
+        if self._last_packet < t - 1.0 and time.monotonic() - self._last_restart > 30:
+            self._last_restart = time.monotonic()
+            log.warning("bluetooth sniffer saw no packets around a dial event — restarting it")
+            try:
+                self._session.stop()
+                self._open()
+            except OSError:
+                log.exception("sniffer restart failed; hold unavailable")
+
+    def _on_payload(self, data: bytes, provider=None):
         now = time.monotonic()
+        self._last_packet = now
+        self._count += 1
+        if now - self._count_t > 10:
+            log.debug("bt packets seen: %d in %.0fs", self._count, now - self._count_t)
+            self._count, self._count_t = 0, now
+        if b"AT+" in data:   # every hands-free command, so new ones show up in the log
+            i = data.find(b"AT+")
+            log.debug("hf command: %r", data[i:i + 24].split(b"\r")[0])
         for d in self.decoders:
             if d.match(data):
                 if now - self._last.get(d.name, 0) < d.debounce_s:
