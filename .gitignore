@@ -6,3 +6,4 @@ __pycache__/
 silence.wav
 dial_log.txt
 trace/hold.etl
+tools/*.txt

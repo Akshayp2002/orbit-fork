@@ -1,5 +1,0 @@
-B failed: [Errno 87] StartTrace failed (87)
-C failed: [Errno 87] StartTrace failed (87)
-LISTENING 25s - hold the dial 2x now, turn once
-events: {}
-AT hits: {}
