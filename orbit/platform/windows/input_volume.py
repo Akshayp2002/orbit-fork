@@ -1,16 +1,25 @@
-"""Dial rotation, read through Bluetooth absolute volume.
+"""Dial rotation, read through the buds' volume.
 
-The CMF dial sends AVRCP absolute-volume changes: one detent = 1/16 of the range.
-Windows applies them to the buds' render endpoint. We get an
-IAudioEndpointVolumeCallback per change and turn the difference into detents.
+Each dial click changes the buds' volume by one step, and Windows applies it to
+the buds' render endpoint. We get an IAudioEndpointVolumeCallback per change and
+turn the difference into clicks.
 
-Passthrough off ("consume"): after the user stops turning, we put the volume
-back where it was, tagged with our own event-context GUID so we ignore the echo.
-If the level gets near the ends mid-spin we recenter immediately, otherwise the
-buds stop reporting at 0 / 100 and the dial would feel dead in one direction.
+What the real-device trace taught us (see git history for the timeline):
 
-Small changes (keyboard volume keys = 2%, slider drags) are below half a detent
-and are ignored on their own.
+  * The step size is not fixed. One session showed 1/16 steps, another 1/15
+    (40.0 -> 46.7 -> 53.3). So the step is learned from the reports, and any
+    change of at least ~a third of a step in one direction counts as a click:
+    a reverse click is never rounded away to zero.
+  * After we set the level ourselves (recenter / duck), the buds may re-send their
+    *old* level once before taking ours. Counting that as turning produced phantom
+    multi-click jumps. A report equal to the level from just before our set is
+    stale: it is ignored and our level is re-applied.
+  * Recenter targets sit on the learned grid so the next click is a clean step.
+
+Passthrough off ("consume"): when the user stops turning we put the level back,
+tagged with our event-context GUID so we can tell our changes from the dial's.
+Near either end we recenter at once, or the buds stop reporting in that direction.
+Keyboard volume keys (2%) and slider drags are below the click threshold.
 """
 from __future__ import annotations
 
@@ -29,13 +38,15 @@ from orbit.core.events import Capability, InputEvent, Kind
 from orbit.platform.base import Emit, RotationSource
 
 log = logging.getLogger("orbit.volume")
+trace = logging.getLogger("orbit.trace")   # step-by-step timeline for latency debugging
 warnings.filterwarnings("ignore", module="pycaw")
 
-STEPS = 16                 # AVRCP absolute volume detents across 0..100%
-RECENTER_IDLE_S = 0.9      # quiet time before we restore the level (slow wheel browsing stays clear of it)
-SETTLE_S = 0.3             # after a recenter the buds may echo a stale level then correct it...
-COALESCE_S = 0.04          # ...so in that window, detents are summed over 40 ms and a -2/+2 pair cancels
-EDGE_STEPS = 2             # recenter immediately when within this many detents of an end
+DEFAULT_STEP = 1 / 16       # first guess; learned from real clicks
+CLICK_MIN = 0.35            # fraction of a step that counts as a click (2% keyboard steps don't)
+RECENTER_IDLE_S = 0.9       # quiet time before we restore the level
+EDGE_STEPS = 2              # recenter at once when this close to either end
+MAX_CLICKS = 3              # the buds fold at most ~2 clicks into one report
+STALE_S = 0.8              # window after our own set in which the buds may echo their old level
 OUR_CONTEXT = comtypes.GUID("{" + str(uuid.UUID("5f0c2a1e-6d3b-4c9a-9a47-0b1e7a1d1a11")) + "}")
 
 
@@ -76,21 +87,23 @@ class VolumeRotationSource(RotationSource):
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
+        self._stopped = threading.Event()
         self._passthrough = True
-        self._bound: dict[str, tuple] = {}   # dev_id -> (AudioDevice, callback)
-        self._baseline: dict[str, float] = {}
+        self._bound: dict[str, tuple] = {}     # dev_id -> (AudioDevice, callback)
+        self._baseline: dict[str, float] = {}  # last level seen per device
+        self._from_dial: dict[str, bool] = {}  # was that last level a dial report (vs our set)?
+        self._step = DEFAULT_STEP
         self._home: float | None = None
         self._last_move = 0.0
+        self._last_dial = 0.0
         self._need_recenter = False
         self._need_rebind = True
         self._dev_cb = None
-        self._recentered_at = 0.0
-        self._last_dial = 0.0
-        self._pending = 0
-        self._flush_timer: threading.Timer | None = None
-        self._saved: float | None = None      # real listening level while ducked
-        self._apply: float | None = None      # level the worker should set now
-        self._stopped = threading.Event()
+        self._saved: float | None = None       # real listening level while ducked
+        self._apply: float | None = None       # level the worker should set now
+        self._reapply: float | None = None     # same, forced, after a stale echo
+        # our most recent set: (time, level before it, level we set, re-applies left)
+        self._last_set = (0.0, None, None, 0)
 
     # ---------------------------------------------------------------- API
     def start(self, emit):
@@ -104,7 +117,7 @@ class VolumeRotationSource(RotationSource):
         self._stopped.wait(1.0)
 
     def set_duck(self, factor):
-        """factor (e.g. 0.5): lower the level while the wheel is open, so detent blips are soft.
+        """factor (e.g. 0.5): lower the level while the wheel is open, so click blips are soft.
         None: restore the real level."""
         with self._lock:
             if factor:
@@ -113,14 +126,15 @@ class VolumeRotationSource(RotationSource):
                     if lvl is None:
                         return
                     self._saved = lvl
-                ducked = max(round(self._saved * factor * STEPS), EDGE_STEPS) / STEPS
-                self._home = min(ducked, self._clamp_home(self._saved))
+                n = round(1 / self._step)
+                ducked = max(round(self._saved * factor * n), EDGE_STEPS) / n
+                self._home = min(ducked, self._snap_home(self._saved))
                 self._apply = self._home
             else:
                 if self._saved is None:
                     return
                 self._apply = self._saved
-                self._home = self._clamp_home(self._saved)
+                self._home = self._snap_home(self._saved)
                 self._saved = None
         self._wake.set()
 
@@ -132,7 +146,7 @@ class VolumeRotationSource(RotationSource):
             if not on:
                 lvl = self._any_level()
                 if lvl is not None:
-                    self._home = self._clamp_home(lvl)
+                    self._home = self._snap_home(lvl)
                     self._need_recenter = True
         self._wake.set()
 
@@ -140,8 +154,8 @@ class VolumeRotationSource(RotationSource):
         return self._saved if self._saved is not None else self._any_level()
 
     def last_activity(self) -> float:
-        """monotonic time of the last dial detent or our own recenter (both pop the OS volume flyout)."""
-        return max(self._last_dial, self._recentered_at)
+        """monotonic time of the last click or our own set (both pop the OS volume flyout)."""
+        return max(self._last_dial, self._last_set[0])
 
     def describe(self):
         names = [d.FriendlyName for d, _ in self._bound.values()]
@@ -149,57 +163,78 @@ class VolumeRotationSource(RotationSource):
 
     # ---------------------------------------------------------------- internals
     def _any_level(self):
-        for dev_id, lvl in self._baseline.items():
+        for lvl in self._baseline.values():
             return lvl
         return None
 
-    @staticmethod
-    def _clamp_home(lvl):
-        s = min(max(round(lvl * STEPS), EDGE_STEPS + 1), STEPS - EDGE_STEPS - 1)
-        return s / STEPS
+    def _snap_home(self, lvl):
+        """Nearest grid point, kept EDGE_STEPS+1 clicks away from both ends."""
+        n = max(round(1 / self._step), 2 * EDGE_STEPS + 3)   # the buds' scale has a whole number of steps
+        k = min(max(round(lvl * n), EDGE_STEPS + 1), n - EDGE_STEPS - 1)
+        return k / n
 
     def _rebind_soon(self):
         self._need_rebind = True
         self._wake.set()
 
     def _on_change(self, dev_id, vol, ctx):
-        if ctx == OUR_CONTEXT:
-            with self._lock:
+        ours = ctx == OUR_CONTEXT
+        trace.debug("win  vol=%5.1f %s", vol * 100, "ours" if ours else "")
+        now = time.monotonic()
+        with self._lock:
+            if ours:
                 self._baseline[dev_id] = vol
-            return
-        with self._lock:
+                self._from_dial[dev_id] = False
+                return
             prev = self._baseline.get(dev_id)
-            self._baseline[dev_id] = vol
             if prev is None:
+                self._baseline[dev_id] = vol
                 return
-            delta = round((vol - prev) * STEPS)
-            if delta == 0:
-                return
-            self._last_move = self._last_dial = time.monotonic()
+            step = self._step
+            d = vol - prev
+
+            # Until the buds confirm our last set, they may still be on their old level: they
+            # re-send it (stale echo) or report a click relative to it. Measure from there.
+            t_set, before, target, retries = self._last_set
+            if before is not None and now - t_set < STALE_S:
+                if abs(vol - target) < CLICK_MIN * step:
+                    self._last_set = (t_set, None, target, 0)        # buds took our level
+                else:
+                    d = vol - before
+                    self._last_set = (t_set, vol, target, max(retries - 1, 0))
+                    if retries > 0:
+                        self._reapply = target                       # push ours again
+                        self._wake.set()
+                    if abs(d) < CLICK_MIN * step:
+                        trace.debug("     stale echo of %.1f ignored, re-applying %.1f", vol * 100, target * 100)
+                        return
+                    trace.debug("     click before buds took our set: measured from %.1f", before * 100)
+
+            self._baseline[dev_id] = vol
+            if abs(d) < CLICK_MIN * step:
+                self._from_dial[dev_id] = True
+                return                                   # echo of our own level, or a keyboard nudge
+
+            # floor(+0.3) instead of round: a single click from an off-grid level (e.g. 1.67
+            # steps after a recenter) stays 1, a real folded double (2.1 steps) stays 2.
+            # Capped so no glitch can ever become a burst.
+            clicks = min(MAX_CLICKS, max(1, int(abs(d) / step + 0.3)))
+            delta = clicks if d > 0 else -clicks
+            # learn the real step from clean single clicks between two dial reports
+            if self._from_dial.get(dev_id) and clicks == 1 and 0.03 < abs(d) < 0.15:
+                self._step = 0.5 * step + 0.5 * abs(d)
+            self._from_dial[dev_id] = True
+
+            self._last_move = self._last_dial = now
             if not self._passthrough:
-                s = round(vol * STEPS)
-                if s <= EDGE_STEPS or s >= STEPS - EDGE_STEPS:
-                    self._last_move = 0.0      # recenter right away
+                k = round(vol / self._step)
+                if k <= EDGE_STEPS or k >= round(1 / self._step) - EDGE_STEPS:
+                    self._last_move = 0.0                # at an end: recenter now
                 self._need_recenter = True
-            settling = time.monotonic() - self._recentered_at < SETTLE_S
-            if settling:
-                self._pending += delta
-                if self._flush_timer is None:
-                    self._flush_timer = threading.Timer(COALESCE_S, self._flush)
-                    self._flush_timer.start()
-        if not settling:
-            self._send(delta)
-        self._wake.set()
-
-    def _flush(self):
-        with self._lock:
-            delta, self._pending, self._flush_timer = self._pending, 0, None
-        if delta:
-            self._send(delta)
-
-    def _send(self, delta):
+        trace.debug("     delta=%+d (step %.2f%%)", delta, self._step * 100)
         if self._emit:
             self._emit(InputEvent(Kind.ROTATE, delta, self.name))
+        self._wake.set()
 
     def _bind(self):
         for dev, cb in self._bound.values():
@@ -223,15 +258,27 @@ class VolumeRotationSource(RotationSource):
         if not self._bound:
             log.warning("no active audio output matching '%s' — dial rotation unavailable until it connects", self.match)
 
+    def _set_level(self, level, why, force=False):
+        """Set the level on every bound device, remembering what it was for the stale filter."""
+        before = self._any_level()
+        if not force and before is not None and abs(before - level) < 1e-3:
+            return
+        trace.debug("set  vol=%5.1f (%s)", level * 100, why)
+        with self._lock:
+            if not force:   # a re-apply keeps the original "before" and retry budget
+                self._last_set = (time.monotonic(), before, level, 2)
+        for dev, _ in list(self._bound.values()):
+            try:
+                dev.EndpointVolume.SetMasterVolumeLevelScalar(level, ctypes.byref(OUR_CONTEXT))
+            except Exception:
+                log.exception("set level failed")
+
     def _recenter(self):
         with self._lock:
             home, self._need_recenter = self._home, False
             if self._passthrough or home is None:
                 return
-        for dev_id, (dev, _) in self._bound.items():
-            if abs(self._baseline.get(dev_id, home) - home) > 1e-3:
-                self._recentered_at = time.monotonic()
-                dev.EndpointVolume.SetMasterVolumeLevelScalar(home, ctypes.byref(OUR_CONTEXT))
+        self._set_level(home, "recenter")
 
     def _worker(self):
         comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
@@ -240,8 +287,11 @@ class VolumeRotationSource(RotationSource):
         while True:
             with self._lock:
                 target, self._apply = self._apply, None
+                again, self._reapply = self._reapply, None
             if target is not None:
-                self._set_all(target)
+                self._set_level(target, "duck/restore")
+            if again is not None:
+                self._set_level(again, "re-apply after stale echo", force=True)
             if self._stop.is_set():
                 break
             if self._need_rebind:
@@ -264,11 +314,3 @@ class VolumeRotationSource(RotationSource):
                 self._wake.wait(1.0)
             self._wake.clear()
         self._stopped.set()
-
-    def _set_all(self, level):
-        self._recentered_at = time.monotonic()
-        for dev, _ in list(self._bound.values()):
-            try:
-                dev.EndpointVolume.SetMasterVolumeLevelScalar(level, ctypes.byref(OUR_CONTEXT))
-            except Exception:
-                log.exception("set level failed")

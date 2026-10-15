@@ -24,6 +24,7 @@ from orbit.platform.base import Emit, InputSource
 from orbit.platform.windows import etw
 
 log = logging.getLogger("orbit.bt")
+trace = logging.getLogger("orbit.trace")
 
 ALL = 0xFFFFFFFFFFFFFFFF
 PROVIDER_NAMES = {
@@ -70,6 +71,7 @@ class BluetoothPacketSource(InputSource):
         self._last_packet = 0.0
         self._last_restart = 0.0
         self._checking = False
+        self._last_trace: dict[str, float] = {}
 
     _failed = False
 
@@ -120,9 +122,37 @@ class BluetoothPacketSource(InputSource):
             except OSError:
                 log.exception("sniffer restart failed; hold unavailable")
 
+    def _trace_avrcp(self, data: bytes, now: float):
+        """Timeline debugging: what the buds actually said over AVRCP, before Windows."""
+        if not trace.isEnabledFor(logging.DEBUG):
+            return
+        msgs = []
+        i = data.find(b"\x00\x19\x58\x31\x00\x00\x02\x0d")          # RegisterNotification rsp, VOLUME_CHANGED
+        if i >= 3 and len(data) > i + 8:
+            ctype = {0x0D: "CHANGED", 0x0F: "INTERIM"}.get(data[i - 3], hex(data[i - 3]))
+            v = data[i + 8] & 0x7F
+            msgs.append(f"buds vol {ctype:<7} {v:3d}/127 step={v * 16 / 127:5.2f}")
+        i = data.find(b"\x00\x19\x58\x50\x00\x00\x01")              # SetAbsoluteVolume
+        if i >= 3 and len(data) > i + 7:
+            ctype = {0x00: "CMD", 0x09: "ACCEPTED", 0x08: "REJECTED"}.get(data[i - 3], hex(data[i - 3]))
+            v = data[i + 7] & 0x7F
+            msgs.append(f"pc   setabs  {ctype:<8} {v:3d}/127 step={v * 16 / 127:5.2f}")
+        i = data.find(b"\x48\x7c")                                   # PASS THROUGH (buttons)
+        if i >= 1 and len(data) > i + 2 and data[i - 1] in (0x00, 0x09):
+            op = data[i + 2]
+            name = {0x44: "PLAY", 0x46: "PAUSE", 0x4B: "NEXT", 0x4C: "PREV", 0x41: "VOL_UP",
+                    0x42: "VOL_DOWN", 0x45: "STOP", 0x48: "REWIND", 0x49: "FFWD"}.get(op & 0x7F, f"op{op & 0x7F:#04x}")
+            msgs.append(f"buds button {name} {'release' if op & 0x80 else 'press'}"
+                        f"{' (ack)' if data[i - 1] == 0x09 else ''}")
+        for m in msgs:
+            if self._last_trace.get(m, 0) < now - 0.03:              # ETW may log a packet twice
+                trace.debug("bt   %s", m)
+            self._last_trace[m] = now
+
     def _on_payload(self, data: bytes, provider=None):
         now = time.monotonic()
         self._last_packet = now
+        self._trace_avrcp(data, now)
         self._count += 1
         if now - self._count_t > 10:
             log.debug("bt packets seen: %d in %.0fs", self._count, now - self._count_t)

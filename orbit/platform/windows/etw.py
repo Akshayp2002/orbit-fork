@@ -10,6 +10,7 @@ import ctypes
 import ctypes.wintypes as wt
 import logging
 import threading
+import time
 import uuid
 from typing import Callable
 
@@ -93,6 +94,7 @@ advapi.ProcessTrace.argtypes = [ctypes.POINTER(ctypes.c_uint64), wt.ULONG, ctype
 advapi.CloseTrace.argtypes = [ctypes.c_uint64]
 
 _INVALID = 0xFFFFFFFFFFFFFFFF
+FLUSH_EVERY_S = 0.05
 # EVENT_RECORD (x64): EVENT_HEADER(80) + ETW_BUFFER_CONTEXT(4) + ExtendedDataCount(2) + UserDataLength(2)
 #                     + ExtendedData*(8) + UserData*(8)
 _OFF_LEN, _OFF_DATA = 86, 96
@@ -119,6 +121,7 @@ class EtwSession:
         self._handle = ctypes.c_uint64()
         self._trace = _INVALID
         self._cb = RECORD_CB(self._record)  # keep a reference: ctypes callbacks die with their wrapper
+        self._flushing = False
 
     def _props(self):
         pw = _Props()
@@ -167,12 +170,24 @@ class EtwSession:
         h = ctypes.c_uint64(self._trace)
         threading.Thread(target=lambda: advapi.ProcessTrace(ctypes.byref(h), 1, None, None),
                          name=f"etw-{self.name}", daemon=True).start()
+        self._flushing = True
+        threading.Thread(target=self._flush_loop, name=f"etw-flush-{self.name}", daemon=True).start()
+
+    def _flush_loop(self):
+        """Real-time ETW hands a buffer to us only when it fills or once per second
+        (FlushTimer's minimum). Bluetooth traffic is light, so events sat for up to 1 s.
+        Forcing a flush every 50 ms caps that delay."""
+        pw = self._props()
+        while self._flushing:
+            time.sleep(FLUSH_EVERY_S)
+            advapi.ControlTraceW(self._handle.value, None, ctypes.byref(pw), 3)  # EVENT_TRACE_CONTROL_FLUSH
 
     def _control_stop(self):
         pw = self._props()
         advapi.ControlTraceW(0, self.name, ctypes.byref(pw), 1)  # EVENT_TRACE_CONTROL_STOP
 
     def stop(self):
+        self._flushing = False
         if self._trace != _INVALID:
             advapi.CloseTrace(self._trace)
             self._trace = _INVALID
