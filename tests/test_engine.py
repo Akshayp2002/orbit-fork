@@ -19,6 +19,7 @@ class FakeOut(Output):
     def scroll(self, notches, horizontal=False): self.log.append(("scroll", notches))
     def media(self, command): self.log.append(("media", command))
     def launch(self, target): self.log.append(("launch", target))
+    def center_window(self, title): self.log.append(("center", title))
 
 
 class FakeUI:
@@ -165,10 +166,12 @@ def test_switcher_releases_alt_when_wheel_opens():
     assert ("up", "alt") in out.log
 
 
-def test_hold_starts_claude_dictation():
+def test_hold_opens_claude_centres_it_and_starts_voice_typing():
     e, out, *_ = make()
     e.handle(ev(Kind.HOLD))
-    assert e.state == State.TOOL and ("keys", "ctrl+alt+v") in out.log
+    time.sleep(0.5)                       # list with wait/center runs on a background thread
+    assert e.state == State.TOOL
+    assert out.log == [("keys", "ctrl+alt+v"), ("center", "Claude"), ("keys", "win+h")]
 
 
 def test_no_hold_source_still_opens_with_double():

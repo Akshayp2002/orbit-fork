@@ -79,6 +79,9 @@ class Output(ABC):
     def active_window_title(self) -> str:
         return ""
 
+    def center_window(self, title: str) -> None:
+        """Move the small foreground window called `title` to the middle of the cursor's screen."""
+
 
 class Platform(ABC):
     name: str = "unknown"

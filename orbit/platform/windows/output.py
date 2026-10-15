@@ -7,6 +7,8 @@ import ctypes.wintypes as wt
 import logging
 import os
 import threading
+import time
+
 from orbit.platform.base import Output
 
 log = logging.getLogger("orbit.output")
@@ -127,6 +129,40 @@ class WindowsOutput(Output):
         except OSError:
             import subprocess
             subprocess.Popen(target, shell=True)
+
+    def center_window(self, title, timeout=1.5, max_w=1000, max_h=800):
+        """Wait for a small foreground window with this title (e.g. Claude's Quick Entry,
+        which otherwise opens wherever it was last left) and put it in the middle of the
+        screen under the cursor, a little above centre."""
+        deadline = time.monotonic() + timeout
+        r = wt.RECT()
+        while time.monotonic() < deadline:
+            h = user32.GetForegroundWindow()
+            n = user32.GetWindowTextLengthW(h)
+            buf = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(h, buf, n + 1)
+            user32.GetWindowRect(h, ctypes.byref(r))
+            w, hh = r.right - r.left, r.bottom - r.top
+            if buf.value == title and 0 < w <= max_w and 0 < hh <= max_h:
+                break
+            time.sleep(0.04)
+        else:
+            log.info("center:%s — no such window appeared", title)
+            return
+        pt = wt.POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        mon = user32.MonitorFromPoint(pt, 2)  # MONITOR_DEFAULTTONEAREST
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wt.DWORD), ("rcMonitor", wt.RECT), ("rcWork", wt.RECT), ("dwFlags", wt.DWORD)]
+
+        mi = MONITORINFO(cbSize=ctypes.sizeof(MONITORINFO))
+        user32.GetMonitorInfoW(mon, ctypes.byref(mi))
+        wa = mi.rcWork
+        x = wa.left + (wa.right - wa.left - w) // 2
+        y = wa.top + int((wa.bottom - wa.top) * 0.30) - hh // 4
+        # SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        user32.SetWindowPos(h, 0, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010)
 
     def active_window_title(self):
         h = user32.GetForegroundWindow()

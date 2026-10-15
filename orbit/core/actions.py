@@ -7,16 +7,23 @@ An action is written in config as "kind:argument", or a list of them run in orde
     hscroll:3            horizontal wheel notches (+ = right)
     media:play_pause     play_pause | next | previous | stop (sent to the real player)
     launch:notepad.exe   open app / file / URL
+    center:Claude        move the (small) foreground window with this title to the middle
+                         of the screen under the cursor; waits up to 1.5 s for it to appear
+    wait:300             pause (ms) between steps of a list
     open_wheel           open the wheel menu
     tool:<id>            switch the active tool
     last_tool            flip back to the previous tool
     none                 do nothing
 
 Engine-level kinds (open_wheel, tool:) are resolved by the engine, everything
-else goes straight to the platform Output.
+else goes straight to the platform Output. A list that contains `wait` or
+`center` runs on a background thread so the UI never stalls; put engine-level
+kinds before the first wait.
 """
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
@@ -55,6 +62,11 @@ def _one(spec: str) -> Action:
         return Action(spec, lambda e: e.out.media(arg))
     if kind == "launch":
         return Action(spec, lambda e: e.out.launch(arg))
+    if kind == "center":
+        return Action(spec, lambda e: e.out.center_window(arg))
+    if kind == "wait":
+        ms = float(arg or 0)
+        return Action(spec, lambda e: time.sleep(ms / 1000))
     if kind == "open_wheel":
         return Action(spec, lambda e: e.open_wheel())
     if kind == "tool":
@@ -70,4 +82,12 @@ def parse(spec: str | list[str] | None) -> Action:
     if isinstance(spec, str):
         return _one(spec)
     parts = [_one(s) for s in spec]
-    return Action(" ; ".join(map(str, parts)), lambda e: [p(e) for p in parts])
+    label = " ; ".join(map(str, parts))
+
+    def run(e):
+        for p in parts:
+            p(e)
+
+    if any(p.spec.split(":")[0].strip().lower() in ("wait", "center") for p in parts):
+        return Action(label, lambda e: threading.Thread(target=run, args=(e,), daemon=True).start())
+    return Action(label, run)
