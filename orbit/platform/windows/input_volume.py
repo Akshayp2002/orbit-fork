@@ -32,7 +32,9 @@ log = logging.getLogger("orbit.volume")
 warnings.filterwarnings("ignore", module="pycaw")
 
 STEPS = 16                 # AVRCP absolute volume detents across 0..100%
-RECENTER_IDLE_S = 0.35     # quiet time before we restore the level
+RECENTER_IDLE_S = 0.9      # quiet time before we restore the level (slow wheel browsing stays clear of it)
+SETTLE_S = 0.3             # after a recenter the buds may echo a stale level then correct it...
+COALESCE_S = 0.04          # ...so in that window, detents are summed over 40 ms and a -2/+2 pair cancels
 EDGE_STEPS = 2             # recenter immediately when within this many detents of an end
 OUR_CONTEXT = comtypes.GUID("{" + str(uuid.UUID("5f0c2a1e-6d3b-4c9a-9a47-0b1e7a1d1a11")) + "}")
 
@@ -82,6 +84,9 @@ class VolumeRotationSource(RotationSource):
         self._need_recenter = False
         self._need_rebind = True
         self._dev_cb = None
+        self._recentered_at = 0.0
+        self._pending = 0
+        self._flush_timer: threading.Timer | None = None
 
     # ---------------------------------------------------------------- API
     def start(self, emit):
@@ -145,9 +150,25 @@ class VolumeRotationSource(RotationSource):
                 if s <= EDGE_STEPS or s >= STEPS - EDGE_STEPS:
                     self._last_move = 0.0      # recenter right away
                 self._need_recenter = True
+            settling = time.monotonic() - self._recentered_at < SETTLE_S
+            if settling:
+                self._pending += delta
+                if self._flush_timer is None:
+                    self._flush_timer = threading.Timer(COALESCE_S, self._flush)
+                    self._flush_timer.start()
+        if not settling:
+            self._send(delta)
+        self._wake.set()
+
+    def _flush(self):
+        with self._lock:
+            delta, self._pending, self._flush_timer = self._pending, 0, None
+        if delta:
+            self._send(delta)
+
+    def _send(self, delta):
         if self._emit:
             self._emit(InputEvent(Kind.ROTATE, delta, self.name))
-        self._wake.set()
 
     def _bind(self):
         for dev, cb in self._bound.values():
@@ -178,6 +199,7 @@ class VolumeRotationSource(RotationSource):
                 return
         for dev_id, (dev, _) in self._bound.items():
             if abs(self._baseline.get(dev_id, home) - home) > 1e-3:
+                self._recentered_at = time.monotonic()
                 dev.EndpointVolume.SetMasterVolumeLevelScalar(home, ctypes.byref(OUR_CONTEXT))
 
     def _worker(self):
