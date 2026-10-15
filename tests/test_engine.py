@@ -55,8 +55,14 @@ class FakeSrc(InputSource):
     def stop(self): ...
 
 
+# Tests count wheel positions, so they pin their own order instead of following
+# whatever the user put in config.toml.
+TEST_WHEEL = ["volume", "switcher", "scroll", "zoom", "undo", "desktops", "tabs", "voice"]
+
+
 def make(caps=(Capability.CLICKS, Capability.HOLD)):
     cfg, _ = config_mod.load()
+    cfg["wheel"]["items"] = list(TEST_WHEEL)
     rot = FakeRot()
     out, ui = FakeOut(), FakeUI()
     e = Engine(cfg, out, ui, [rot, FakeSrc(caps)])
