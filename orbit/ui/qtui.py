@@ -28,10 +28,9 @@ class Bridge(QObject):
     hudShown = Signal(str, str, str, float, int)   # glyph, title, detail, progress(-1 none), direction
     placed = Signal(int, int, int, int)
 
-    def __init__(self, cfg: dict, sounds: dict[str, Path]):
+    def __init__(self, cfg: dict):
         super().__init__()
         self._cfg = cfg
-        self._sounds = {k: QUrl.fromLocalFile(str(v)).toString() for k, v in sounds.items()}
 
     @Property(str, constant=True)
     def accent(self):
@@ -41,17 +40,6 @@ class Bridge(QObject):
     def uiScale(self):
         return float(self._cfg["ui"]["scale"])
 
-    soundChanged = Signal()
-
-    def _get_sound(self):
-        return bool(self._cfg["ui"]["sound"])
-
-    def set_sound(self, on: bool):
-        self._cfg["ui"]["sound"] = bool(on)
-        self.soundChanged.emit()
-
-    soundOn = Property(bool, _get_sound, notify=soundChanged)
-
     @Property(int, constant=True)
     def hudMs(self):
         return int(self._cfg["ui"]["hud_ms"])
@@ -60,16 +48,12 @@ class Bridge(QObject):
     def iconFont(self):
         return assets.ICON_FONT
 
-    @Slot(str, result=str)
-    def sound(self, name):
-        return self._sounds.get(name, "")
-
 
 class QtUI:
     """Engine-facing adapter."""
 
-    def __init__(self, cfg: dict, sounds: dict[str, Path]):
-        self.bridge = Bridge(cfg, sounds)
+    def __init__(self, cfg: dict):
+        self.bridge = Bridge(cfg)
         self.qml = QQmlApplicationEngine()
         self.qml.rootContext().setContextProperty("orbit", self.bridge)
         self.qml.load(QUrl.fromLocalFile(str(QML)))

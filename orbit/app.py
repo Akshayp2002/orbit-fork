@@ -20,7 +20,6 @@ from orbit.core import config as config_mod
 from orbit.core.engine import Engine
 from orbit.core.events import InputEvent
 from orbit.platform import get_platform
-from orbit.ui import assets
 from orbit.ui.qtui import QtUI
 
 log = logging.getLogger("orbit")
@@ -115,7 +114,7 @@ def main(argv=None):
         from orbit.platform.dev import UdpDevSource
         sources.append(UdpDevSource())
     out = plat.create_output(cfg)
-    ui = QtUI(cfg, assets.ensure_sounds(data_dir() / "sounds"))
+    ui = QtUI(cfg)
 
     # Start sources first so the engine sees what actually works (e.g. falls back to
     # triple-press for the wheel when the hold sniffer can't start).
@@ -172,11 +171,7 @@ def main(argv=None):
     a_restart.triggered.connect(restart)
 
     # live toggles
-    a_sound = QAction("Tick sounds")
-    a_sound.setCheckable(True)
-    a_sound.setChecked(bool(cfg["ui"]["sound"]))
-    a_sound.toggled.connect(ui.bridge.set_sound)
-    toggles = [a_sound]
+    toggles = []
     for svc in services:
         if getattr(svc, "toggle_label", None):
             a = QAction(svc.toggle_label)

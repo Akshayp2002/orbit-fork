@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Shapes
 import QtQuick.Effects
-import QtMultimedia
 
 // Orbit overlay: wheel menu + HUD pill. Never takes focus, never eats clicks.
 Window {
@@ -41,14 +40,6 @@ Window {
         }
     }
 
-    // ---------------------------------------------------------------- sounds
-    SoundEffect { id: sTick;   source: orbit.sound("tick");   volume: 1.0 }
-    SoundEffect { id: sWrap;   source: orbit.sound("wrap");   volume: 1.0 }
-    SoundEffect { id: sSelect; source: orbit.sound("select"); volume: 1.0 }
-    SoundEffect { id: sOpen;   source: orbit.sound("open");   volume: 1.0 }
-    SoundEffect { id: sClose;  source: orbit.sound("close");  volume: 1.0 }
-    function play(fx) { if (orbit.soundOn) { fx.stop(); fx.play() } }
-
     // ================================================================ WHEEL
     Item {
         id: wheel
@@ -78,17 +69,14 @@ Window {
             shown = true
             openAnim.restart()
             centre.swap(0)
-            win.play(sOpen)
         }
 
         function move(idx, dir) {
             var d = ((idx - index) % n + n) % n           // forward distance
             if (dir < 0 && d !== 0) d = d - n
-            var wrapped = (dir > 0 && idx < index) || (dir < 0 && idx > index)
             index = idx
             selTarget += d * step
             centre.swap(dir)
-            win.play(wrapped ? sWrap : sTick)
         }
 
         function commit(idx) {
@@ -97,7 +85,6 @@ Window {
             shown = false
             openAnim.stop()
             commitAnim.restart()
-            win.play(sSelect)
         }
 
         function cancel() {
@@ -105,7 +92,6 @@ Window {
             shown = false
             openAnim.stop()
             closeAnim.restart()
-            win.play(sClose)
         }
 
         ParallelAnimation {

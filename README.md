@@ -29,8 +29,9 @@ Log: `%LOCALAPPDATA%\Orbit\orbit.log`.
 | Wait 5 s | — | keeps the highlighted tool (one-shot actions never fire on timeout) |
 
 An on-screen tag shows the active tool and its value whenever you use the dial,
-then fades out. While the wheel is open, every click of the dial plays a soft tick
-in your ears; wrapping past the first item plays a lower tick.
+then fades out. While the wheel is open your audio drops to half, so each click's
+volume blip stays soft; it comes back when you select or cancel. (The tone you hear
+per click is the buds' own firmware, not Orbit.)
 
 ## How the dial reaches the PC (reverse-engineered)
 

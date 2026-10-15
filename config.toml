@@ -29,7 +29,6 @@ duck_volume = 0.5           # audio drops to this fraction while the wheel is op
 on_timeout = "select"       # "select": keep the highlighted tool; "cancel": keep the old one
 
 [ui]
-sound = false       # soft tick in your ears per detent while the wheel is open
 hide_os_volume_flyout = true   # hide the Windows volume bar when the dial causes it (keyboard keys still show it)
 hud_ms = 1400       # how long the HUD pill stays after the last interaction
 scale = 1.0

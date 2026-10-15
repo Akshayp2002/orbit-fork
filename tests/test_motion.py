@@ -17,16 +17,16 @@ def test_slow_clicks_stay_exact():
     assert s.gain(8) == 1.0
 
 
-def test_sustained_fast_spin_builds_gain():
+def test_flick_is_fast_from_second_report():
+    """Real log: a quick flick arrives as 2-3 reports ~0.32-0.4 s apart."""
     s = SpinTracker()
-    gains = []
-    t = 100.0
-    for _ in range(6):
-        s.update(1, t)
-        gains.append(s.gain(8))
-        t += 0.3
-    assert gains[0] == 1.0 and gains[-1] == 8.0
-    assert gains == sorted(gains)
+    s.update(1, 100.0)                 # first of a flick looks slow (after a pause)
+    assert s.gain(8) == 1.0
+    s.update(1, 100.35)
+    assert s.gain(8) == 8.0 and s.catch_up
+    s.update(1, 100.70)
+    assert s.gain(8) == 8.0 and not s.catch_up
+    assert s.momentum > 0.6
 
 
 def test_folded_double_report_counts_as_fast():
@@ -63,15 +63,31 @@ def _scrolled(tool, deltas, gap):
 
 
 def test_fast_spin_scrolls_much_further_than_slow():
-    slow = _scrolled(SmoothScrollTool("s", {}), [1] * 4, 0.7)
-    fast = _scrolled(SmoothScrollTool("s", {}), [1] * 4, 0.3)
+    slow = _scrolled(SmoothScrollTool("s", {}), [1] * 4, 0.75)
+    fast = _scrolled(SmoothScrollTool("s", {}), [1] * 4, 0.33)
     assert 3.5 < slow < 4.5            # careful clicks ~ 1 notch each
-    assert fast > slow * 3             # intent: a spin flies
+    assert fast > slow * 5             # intent: a spin flies
+
+
+def test_two_report_flick_goes_far():
+    flick = _scrolled(SmoothScrollTool("s", {}), [1, 1], 0.34)
+    two_clicks = _scrolled(SmoothScrollTool("s", {}), [1, 1], 0.8)
+    assert flick > two_clicks * 5
 
 
 def test_reverse_brakes_momentum():
-    up_then_down = _scrolled(SmoothScrollTool("s", {}), [1, 1, 1, 1, -1], 0.3)
-    assert up_then_down < 30           # no runaway glide after reversing
+    tool, e = SmoothScrollTool("s", {}), _E()
+    tool.enter(e)
+    for _ in range(4):
+        tool.rotate(e, 1)
+        time.sleep(0.33)
+    mark = len(e.out.log)
+    tool.rotate(e, -1)                 # turn back mid-glide
+    time.sleep(1.0)
+    tool.leave(e)
+    after = [n for k, n in e.out.log[mark:] if k == "scroll"]
+    assert all(n < 0 for n in after)   # no forward glide survives the reversal
+    assert -1.3 < sum(after) < -0.7    # and the correction is one precise click
 
 
 def test_wheel_ducks_and_restores():

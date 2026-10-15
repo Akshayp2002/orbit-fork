@@ -98,7 +98,9 @@ class KeysTool(Tool):
         """Fast spins go further, slow clicks stay exact (iPod / MX wheel behaviour)."""
         a = self.cw if delta > 0 else self.ccw
         self.spin.update(delta)
-        for _ in range(round(abs(delta) * self.spin.gain(self.max_gain))):
+        g = self.spin.gain(self.max_gain)
+        n = abs(delta) * g + ((g - 1) if self.spin.catch_up else 0)
+        for _ in range(round(n)):
             a(e)
         return Hud(self.icon, self.label, self.detail_cw if delta > 0 else self.detail_ccw, None, 1 if delta > 0 else -1)
 
@@ -117,7 +119,7 @@ class SmoothScrollTool(Tool):
         self.base = float(cfg.get("notches_per_detent", 1.0))
         self.max_gain = float(cfg.get("max_gain", 8))
         glide = float(cfg.get("glide_ms", 380)) / 1000          # momentum decay time constant
-        self.momentum = 1.6 if glide > 0 else 0.0
+        self.momentum_k = 1.6 if glide > 0 else 0.0
         self.glide = max(glide, 1e-3)
         self.ease = max(float(cfg.get("ease_ms", 90)) / 1000, 1e-3)  # how fast an impulse is delivered
         self.horizontal = bool(cfg.get("horizontal", False))
@@ -150,13 +152,15 @@ class SmoothScrollTool(Tool):
         self.spin.update(delta)
         g = self.spin.gain(self.max_gain)
         impulse = d * self.base * abs(delta) * g
+        if self.spin.catch_up:            # the previous report was the start of this flick
+            impulse += d * self.base * (g - 1)
         with self._lock:
             if d != self._dir:            # brake: kill everything going the other way
                 self._pending = self._vel = self._carry = 0.0
             self._dir = d
             self._pending += impulse
-            # momentum only builds once the spin shows intent
-            self._vel += impulse * self.spin.intensity * self.momentum
+            # glide only builds with sustained spinning
+            self._vel += impulse * self.spin.momentum * self.momentum_k
         detail = "down" if d > 0 else "up"
         if self.spin.intensity > 0.5:
             detail += " · fast"
