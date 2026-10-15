@@ -61,7 +61,7 @@ TEST_WHEEL = ["volume", "switcher", "scroll", "zoom", "undo", "desktops", "tabs"
 
 
 def make(caps=(Capability.CLICKS, Capability.HOLD)):
-    cfg, _ = config_mod.load()
+    cfg, _ = config_mod.load(platform="windows")    # same expectations on every CI runner
     cfg["wheel"]["items"] = list(TEST_WHEEL)
     rot = FakeRot()
     out, ui = FakeOut(), FakeUI()
@@ -188,7 +188,7 @@ def test_no_hold_source_still_opens_with_double():
 
 
 def test_hold_only_config_falls_back_to_triple():
-    cfg, _ = config_mod.load()
+    cfg, _ = config_mod.load(platform="windows")
     cfg["gestures"]["open_wheel"] = ["hold"]
     e = Engine(cfg, FakeOut(), FakeUI(), [FakeRot(), FakeSrc((Capability.CLICKS,))])
     assert e.open_with == {"triple"}
@@ -204,7 +204,7 @@ def test_press_release_quick_select():
 
 
 def test_bad_config_rejected():
-    cfg, _ = config_mod.load()
+    cfg, _ = config_mod.load(platform="windows")
     cfg["tools"]["x"] = {"type": "keys", "rotate_cw": "teleport:mars"}
     with pytest.raises(ValueError):
         config_mod.validate(cfg)
