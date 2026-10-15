@@ -88,6 +88,9 @@ class VolumeRotationSource(RotationSource):
         self._last_dial = 0.0
         self._pending = 0
         self._flush_timer: threading.Timer | None = None
+        self._saved: float | None = None      # real listening level while ducked
+        self._apply: float | None = None      # level the worker should set now
+        self._stopped = threading.Event()
 
     # ---------------------------------------------------------------- API
     def start(self, emit):
@@ -95,7 +98,30 @@ class VolumeRotationSource(RotationSource):
         threading.Thread(target=self._worker, name="volume-worker", daemon=True).start()
 
     def stop(self):
+        self.set_duck(None)          # never leave the user at half volume
         self._stop.set()
+        self._wake.set()
+        self._stopped.wait(1.0)
+
+    def set_duck(self, factor):
+        """factor (e.g. 0.5): lower the level while the wheel is open, so detent blips are soft.
+        None: restore the real level."""
+        with self._lock:
+            if factor:
+                if self._saved is None:
+                    lvl = self._any_level()
+                    if lvl is None:
+                        return
+                    self._saved = lvl
+                ducked = max(round(self._saved * factor * STEPS), EDGE_STEPS) / STEPS
+                self._home = min(ducked, self._clamp_home(self._saved))
+                self._apply = self._home
+            else:
+                if self._saved is None:
+                    return
+                self._apply = self._saved
+                self._home = self._clamp_home(self._saved)
+                self._saved = None
         self._wake.set()
 
     def set_passthrough(self, on):
@@ -111,7 +137,7 @@ class VolumeRotationSource(RotationSource):
         self._wake.set()
 
     def level(self):
-        return self._any_level()
+        return self._saved if self._saved is not None else self._any_level()
 
     def last_activity(self) -> float:
         """monotonic time of the last dial detent or our own recenter (both pop the OS volume flyout)."""
@@ -211,7 +237,13 @@ class VolumeRotationSource(RotationSource):
         comtypes.CoInitializeEx(comtypes.COINIT_MULTITHREADED)
         self._dev_cb = _DevCb(self)
         AudioUtilities.GetDeviceEnumerator().RegisterEndpointNotificationCallback(self._dev_cb)
-        while not self._stop.is_set():
+        while True:
+            with self._lock:
+                target, self._apply = self._apply, None
+            if target is not None:
+                self._set_all(target)
+            if self._stop.is_set():
+                break
             if self._need_rebind:
                 self._need_rebind = False
                 time.sleep(0.3)  # let the driver settle after connect
@@ -231,3 +263,12 @@ class VolumeRotationSource(RotationSource):
             else:
                 self._wake.wait(1.0)
             self._wake.clear()
+        self._stopped.set()
+
+    def _set_all(self, level):
+        self._recentered_at = time.monotonic()
+        for dev, _ in list(self._bound.values()):
+            try:
+                dev.EndpointVolume.SetMasterVolumeLevelScalar(level, ctypes.byref(OUR_CONTEXT))
+            except Exception:
+                log.exception("set level failed")

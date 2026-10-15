@@ -62,6 +62,7 @@ class Engine:
             log.warning("no HOLD source available; wheel opens with '%s'", self.open_with)
 
         self.dismiss_after = cfg["wheel"].get("dismiss_after_ms", 6000) / 1000
+        self.duck = float(cfg["wheel"].get("duck_volume", 0.5))   # 0 or 1 = off
         self.timeout_selects = cfg["wheel"].get("on_timeout", "select") == "select"
         self.state = State.TOOL
         self.tool: Tool = self.tools[cfg.get("default_tool", self.wheel_ids[0])]
@@ -199,6 +200,15 @@ class Engine:
         self._sync_passthrough()
 
     def _sync_passthrough(self) -> None:
-        on = self.state == State.TOOL and self.tool.rotation_passthrough
+        """Rotation side effects follow state: the wheel consumes rotation and ducks the
+        level (so each detent's native blip is soft); tool mode restores the real level
+        first, then passes rotation through or consumes it per tool."""
+        wheel = self.state == State.WHEEL
+        on = not wheel and self.tool.rotation_passthrough
         for s in self.rotation_sources:
-            s.set_passthrough(on)
+            if wheel:
+                s.set_passthrough(False)
+                s.set_duck(self.duck if 0 < self.duck < 1 else None)
+            else:
+                s.set_duck(None)
+                s.set_passthrough(on)

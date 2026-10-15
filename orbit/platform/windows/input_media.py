@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 import wave
 from pathlib import Path
 
@@ -54,6 +55,8 @@ class MediaButtonSource(InputSource):
         self._tokens = []
         self._mgr = None
         self.own_aumid: str | None = None
+        self._focus_lock = threading.Lock()
+        self._last_check = 0.0
 
     def start(self, emit):
         from winrt.windows.foundation import Uri
@@ -109,6 +112,41 @@ class MediaButtonSource(InputSource):
         self._player.play()
         self._smtc.playback_status = MediaPlaybackStatus.PLAYING
 
+    def _current_aumid(self):
+        cur = self._mgr.get_current_session() if self._mgr else None
+        return cur.source_app_user_model_id if cur else None
+
+    def has_focus(self) -> bool:
+        """True when presses will reach us (or we can't tell yet)."""
+        if not self._mgr or not self.own_aumid:
+            return True
+        cur = self._current_aumid()
+        return cur is None or cur == self.own_aumid
+
+    def ensure_focus(self):
+        """Reassert until Windows routes media buttons to us again (a press in the gap
+        would otherwise pause the user's real player instead of reaching the wheel)."""
+        if not self._focus_lock.acquire(blocking=False):
+            return
+        try:
+            for wait in (0.15, 0.3, 0.6, 1.2, 2.4):
+                if self.has_focus():
+                    return
+                self.reassert()
+                time.sleep(wait)
+            if not self.has_focus():
+                log.warning("could not take media focus back from %s", self._current_aumid())
+        finally:
+            self._focus_lock.release()
+
+    def observe(self, ev):
+        # The wheel is about to need clicks: make sure they will come to us.
+        now = time.monotonic()
+        if ev.kind in (Kind.HOLD, Kind.ROTATE) and now - self._last_check > 1.0:
+            self._last_check = now
+            if not self.has_focus():
+                threading.Thread(target=self.ensure_focus, daemon=True).start()
+
     def _guard(self):
         from winrt.windows.media.control import GlobalSystemMediaTransportControlsSessionManager as M
 
@@ -118,11 +156,9 @@ class MediaButtonSource(InputSource):
             await self._learn_own_aumid()
 
             def changed(*_):
-                cur = self._mgr.get_current_session()
-                aumid = cur.source_app_user_model_id if cur else None
-                if aumid and self.own_aumid and aumid != self.own_aumid:
-                    log.info("media focus taken by %s — reasserting", aumid)
-                    threading.Timer(0.4, self.reassert).start()
+                if not self.has_focus():
+                    log.info("media focus taken by %s — reasserting", self._current_aumid())
+                    threading.Timer(0.3, self.ensure_focus).start()
 
             self._mgr.add_current_session_changed(changed)
             while True:
@@ -143,4 +179,4 @@ class MediaButtonSource(InputSource):
         cur = self._mgr.get_current_session()
         if cur and self.own_aumid and cur.source_app_user_model_id != self.own_aumid:
             log.info("%s holds media focus at startup — reasserting", cur.source_app_user_model_id)
-            self.reassert()
+            threading.Thread(target=self.ensure_focus, daemon=True).start()

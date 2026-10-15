@@ -37,10 +37,12 @@ class FakeRot(RotationSource):
 
     def __init__(self):
         self.passthrough = None
+        self.duck = []
 
     def start(self, emit): ...
     def stop(self): ...
     def set_passthrough(self, on): self.passthrough = on
+    def set_duck(self, f): self.duck.append(f)
     def level(self): return 0.5
 
 
@@ -79,7 +81,7 @@ def test_hold_opens_wheel_rotate_click_selects():
     assert e.tool.id == "scroll" and e.state == State.TOOL
     assert rot.passthrough is False          # scroll consumes rotation
     e.handle(ev(Kind.ROTATE, 1))
-    assert ("scroll", 1.0) in out.log
+    time.sleep(0.4)                          # smooth scroll delivers over a few frames`n    assert 0.8 < sum(n for k, n in out.log if k == "scroll") <= 1.2
 
 
 def test_wheel_wraps_backwards():

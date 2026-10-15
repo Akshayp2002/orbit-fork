@@ -16,7 +16,7 @@ DEFAULTS: dict = {
         "hold": "open_wheel",
         "open_wheel_fallback": "triple",
     },
-    "wheel": {"items": [], "dismiss_after_ms": 6000},
+    "wheel": {"items": [], "dismiss_after_ms": 6000, "duck_volume": 0.5},
     "ui": {"sound": False, "hud_ms": 1400, "scale": 1.0, "accent": "#7C9CFF", "hide_os_volume_flyout": True},
     "tools": {},
 }

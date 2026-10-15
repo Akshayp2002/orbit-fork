@@ -43,6 +43,9 @@ class RotationSource(InputSource):
     @abstractmethod
     def set_passthrough(self, on: bool) -> None: ...
 
+    def set_duck(self, factor: float | None) -> None:
+        """Lower the native level by `factor` while the wheel is open; None restores it."""
+
     def level(self) -> float | None:
         """Current native level 0..1 (for HUD display), if meaningful."""
         return None

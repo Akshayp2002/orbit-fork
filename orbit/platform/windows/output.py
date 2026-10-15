@@ -118,7 +118,7 @@ class WindowsOutput(Output):
         log.info("media:%s -> %s", command, target.source_app_user_model_id)
         if self.media_source and command == "play_pause":
             await asyncio.sleep(0.6)   # the player grabs media focus when it starts; take it back
-            self.media_source.reassert()
+            threading.Thread(target=self.media_source.ensure_focus, daemon=True).start()
 
     # ---------------- launch
     def launch(self, target):

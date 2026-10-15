@@ -25,6 +25,7 @@ open_wheel_fallback = "triple"
 # Clockwise order, starting at 12 o'clock. 8 or fewer reads best on a dial.
 items = ["volume", "switcher", "scroll", "zoom", "undo", "desktops", "tabs", "voice"]
 dismiss_after_ms = 5000
+duck_volume = 0.5           # audio drops to this fraction while the wheel is open (1 = off)
 on_timeout = "select"       # "select": keep the highlighted tool; "cancel": keep the old one
 
 [ui]
@@ -49,14 +50,13 @@ icon = "windows"
 commit_after_ms = 900
 
 [tools.scroll]
-type = "keys"
+type = "smooth_scroll"     # momentum scrolling: slow clicks nudge, fast spins fly and glide
 label = "Scroll"
 icon = "scroll"
-rotate_cw = "scroll:1"
-rotate_ccw = "scroll:-1"
-accel = true
-detail_cw = "down"
-detail_ccw = "up"
+notches_per_detent = 1.0   # distance of one careful click (1 notch ~ 3 lines)
+max_gain = 8               # a sustained fast spin goes up to this many times further per click
+glide_ms = 380             # how long momentum carries after you stop (0 = none)
+ease_ms = 90               # how quickly each click's distance is delivered
 
 [tools.zoom]
 type = "keys"
