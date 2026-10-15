@@ -62,17 +62,29 @@ def _scrolled(tool, deltas, gap):
     return sum(n for k, n in e.out.log if k == "scroll")
 
 
-def test_fast_spin_scrolls_much_further_than_slow():
+def test_fast_spin_scrolls_further_than_slow():
     slow = _scrolled(SmoothScrollTool("s", {}), [1] * 4, 0.75)
     fast = _scrolled(SmoothScrollTool("s", {}), [1] * 4, 0.33)
-    assert 3.5 < slow < 4.5            # careful clicks ~ 1 notch each
-    assert fast > slow * 5             # intent: a spin flies
+    assert 3.5 < slow < 4.8            # careful clicks ~ 1 notch each
+    assert fast > slow * 1.4           # faster turning goes further...
+    assert fast < slow * 3.2           # ...but stays the same page, not a jump
 
 
-def test_two_report_flick_goes_far():
-    flick = _scrolled(SmoothScrollTool("s", {}), [1, 1], 0.34)
-    two_clicks = _scrolled(SmoothScrollTool("s", {}), [1, 1], 0.8)
-    assert flick > two_clicks * 5
+def test_speed_builds_gradually_and_ignores_one_quick_click():
+    """Mac test gaps (s): normal turning varies 0.3-0.6 from click to click. The
+    distance per click must change smoothly, not swing 2x <-> 8x."""
+    tool = SmoothScrollTool("s", {})
+    tool._dir = 1
+    gains = []
+    t0 = time.monotonic()
+    for gap in (0.54, 0.43, 0.63, 0.30, 0.55, 0.45):
+        tool._t = time.monotonic() - gap
+        tool.rotate(_E(), 1)
+        gains.append(1 + (tool.max_gain - 1) * tool.speed ** 2)
+    tool.leave(_E())
+    steps = [abs(b - a) for a, b in zip(gains, gains[1:])]
+    assert max(steps) < 0.45, gains     # no jump between neighbouring clicks
+    assert max(gains) < 2.2, gains      # normal turning never flies
 
 
 def test_reverse_brakes_momentum():

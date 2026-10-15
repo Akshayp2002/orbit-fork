@@ -107,23 +107,30 @@ class KeysTool(Tool):
 
 class SmoothScrollTool(Tool):
     """Scroll with intent: each detent is an impulse, delivered as fine-grained wheel
-    steps at ~120 Hz with momentum, so motion stays continuous between the buds'
-    sparse reports. Slow clicks = small precise nudges; a sustained fast spin
-    builds speed and glides to a natural stop. Reversing direction brakes at once.
+    steps at ~120 Hz, so motion stays continuous between the buds' sparse reports.
+
+    Speed is a smoothed estimate, not a per-gap verdict: the buds report at most one
+    step every ~0.3 s and drop the clicks in between, so normal turning lands anywhere
+    in 0.3-0.8 s and neighbouring gaps differ by chance. Judging each gap alone swung
+    the distance per click 2x <-> 8x and read as jumpy (Mac test, Oct 2026). Now speed
+    eases toward the turning rate (EMA), the gain curve is gentle, and the top gain
+    (~3x) only makes up for the clicks the buds drop. Reversing brakes at once.
     """
     FRAME_S = 1 / 120
     MIN_UNITS = 8                    # smallest wheel delta sent (1 notch = 120 units)
+    FAST_GAP = 0.35                  # reports this close: turning faster than the buds report
+    SLOW_GAP = 0.90                  # this far apart: deliberate single clicks
+    SMOOTH = 0.35                    # how quickly the speed estimate follows the turning
 
     def __init__(self, tid, cfg):
         super().__init__(tid, cfg)
         self.base = float(cfg.get("notches_per_detent", 1.0))
-        self.max_gain = float(cfg.get("max_gain", 8))
-        glide = float(cfg.get("glide_ms", 380)) / 1000          # momentum decay time constant
-        self.momentum_k = 1.6 if glide > 0 else 0.0
+        self.max_gain = float(cfg.get("max_gain", 3))
+        glide = float(cfg.get("glide_ms", 300)) / 1000          # momentum decay time constant
+        self.momentum_k = 0.8 if glide > 0 else 0.0
         self.glide = max(glide, 1e-3)
         self.ease = max(float(cfg.get("ease_ms", 90)) / 1000, 1e-3)  # how fast an impulse is delivered
         self.horizontal = bool(cfg.get("horizontal", False))
-        self.spin = SpinTracker()
         self._lock = threading.Lock()
         self._pending = 0.0     # notches still to deliver from impulses
         self._vel = 0.0         # notches/s of momentum
@@ -132,6 +139,8 @@ class SmoothScrollTool(Tool):
         self._out = None
         self._run = False
         self._gen = 0
+        self._t = 0.0
+        self.speed = 0.0        # 0 = careful clicks .. 1 = faster than the buds can report
 
     def enter(self, e):
         self._out = e.out
@@ -149,20 +158,24 @@ class SmoothScrollTool(Tool):
         if not self._run:
             self.enter(e)
         d = 1 if delta > 0 else -1
-        self.spin.update(delta)
-        g = self.spin.gain(self.max_gain)
+        now = time.monotonic()
+        gap, self._t = now - self._t, now
+        raw = min(1.0, max(0.0, (self.SLOW_GAP - gap) / (self.SLOW_GAP - self.FAST_GAP)))
+        if d != self._dir:
+            self.speed = 0.0                 # a turn-back is a correction: exact
+        else:
+            self.speed += self.SMOOTH * (raw - self.speed)
+        g = 1 + (self.max_gain - 1) * self.speed ** 2
         impulse = d * self.base * abs(delta) * g
-        if self.spin.catch_up:            # the previous report was the start of this flick
-            impulse += d * self.base * (g - 1)
         with self._lock:
             if d != self._dir:            # brake: kill everything going the other way
                 self._pending = self._vel = self._carry = 0.0
             self._dir = d
             self._pending += impulse
-            # glide only builds with sustained spinning
-            self._vel += impulse * self.spin.momentum * self.momentum_k
+            # glide only builds with sustained speed
+            self._vel += impulse * self.speed ** 2 * self.momentum_k
         detail = "down" if d > 0 else "up"
-        if self.spin.intensity > 0.5:
+        if self.speed > 0.5:
             detail += " · fast"
         return Hud(self.icon, self.label, detail, None, d)
 
