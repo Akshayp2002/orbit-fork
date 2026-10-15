@@ -1,0 +1,103 @@
+# Orbit config - dial + wheel.
+# Copy to %APPDATA%\Orbit\config.toml (Windows) or ~/Library/Application Support/Orbit/config.toml (mac)
+# to override without touching the repo.
+#
+# Action strings:  keys:ctrl+z | scroll:3 | hscroll:-2 | media:play_pause|next|previous
+#                  launch:notepad.exe | launch:https://... | tool:<id> | open_wheel | none
+#                  or a list: ["keys:ctrl+c", "launch:notepad.exe"]
+
+default_tool = "volume"
+
+[device]
+# Name fragment of the audio output the buds show up as. Rotation is only read from this device.
+audio_endpoint_match = "CMF Buds Pro 2"
+
+[gestures]
+# What presses do while a tool is active, unless that tool defines its own click/double/triple.
+click  = "media:play_pause"
+double = "last_tool"        # flip between the two most recent tools
+triple = "media:next"
+hold   = "open_wheel"
+# Used to open the wheel when press-and-hold can't be read (not running as admin).
+open_wheel_fallback = "triple"
+
+[wheel]
+# Clockwise order, starting at 12 o'clock. 8 or fewer reads best on a dial.
+items = ["volume", "switcher", "scroll", "zoom", "undo", "desktops", "tabs", "voice"]
+dismiss_after_ms = 5000
+on_timeout = "select"       # "select": keep the highlighted tool; "cancel": keep the old one
+
+[ui]
+sound = true        # soft tick per detent while the wheel is open
+hud_ms = 1400       # how long the HUD pill stays after the last interaction
+scale = 1.0
+accent = "#7C9CFF"
+
+# ---------------------------------------------------------------- tools
+[tools.volume]
+type = "volume"
+label = "Volume"
+icon = "volume"
+double = "media:next"
+triple = "media:previous"
+
+[tools.switcher]
+type = "window_switcher"
+label = "Windows"
+icon = "windows"
+commit_after_ms = 900
+
+[tools.scroll]
+type = "keys"
+label = "Scroll"
+icon = "scroll"
+rotate_cw = "scroll:1"
+rotate_ccw = "scroll:-1"
+accel = true
+detail_cw = "down"
+detail_ccw = "up"
+
+[tools.zoom]
+type = "keys"
+label = "Zoom"
+icon = "zoom"
+rotate_cw = "keys:ctrl+plus"
+rotate_ccw = "keys:ctrl+minus"
+click = "keys:ctrl+0"
+detail_cw = "in"
+detail_ccw = "out"
+
+[tools.undo]
+type = "keys"
+label = "Undo / Redo"
+icon = "undo"
+rotate_cw = "keys:ctrl+y"
+rotate_ccw = "keys:ctrl+z"
+detail_cw = "redo"
+detail_ccw = "undo"
+
+[tools.desktops]
+type = "keys"
+label = "Desktops"
+icon = "desktops"
+rotate_cw = "keys:ctrl+win+right"
+rotate_ccw = "keys:ctrl+win+left"
+click = "keys:win+tab"
+detail_cw = "next"
+detail_ccw = "previous"
+
+[tools.tabs]
+type = "keys"
+label = "Tabs"
+icon = "tabs"
+rotate_cw = "keys:ctrl+tab"
+rotate_ccw = "keys:ctrl+shift+tab"
+click = "keys:ctrl+w"
+detail_cw = "next tab"
+detail_ccw = "previous tab"
+
+[tools.voice]
+type = "action"
+label = "Dictate"
+icon = "mic"
+run = "keys:win+h"

@@ -1,0 +1,90 @@
+"""Platform contracts. Each OS backend implements these; core code depends only on them."""
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from typing import Callable
+
+from orbit.core.events import Capability, InputEvent
+
+Emit = Callable[[InputEvent], None]
+
+
+class InputSource(ABC):
+    """Turns some hardware/OS signal into InputEvents. Runs on its own thread(s)."""
+
+    name: str = "source"
+    capabilities: frozenset[Capability] = frozenset()
+
+    @abstractmethod
+    def start(self, emit: Emit) -> None: ...
+
+    @abstractmethod
+    def stop(self) -> None: ...
+
+    @property
+    def available(self) -> bool:
+        """False when the source cannot run here (missing rights, device absent...)."""
+        return True
+
+    def describe(self) -> str:
+        return self.name
+
+
+class RotationSource(InputSource):
+    """A source whose rotation is borrowed from another OS function (e.g. volume).
+
+    passthrough=True  -> rotation keeps its native effect (volume really changes)
+    passthrough=False -> rotation is consumed; the source undoes the side effect.
+    """
+
+    @abstractmethod
+    def set_passthrough(self, on: bool) -> None: ...
+
+    def level(self) -> float | None:
+        """Current native level 0..1 (for HUD display), if meaningful."""
+        return None
+
+
+class Output(ABC):
+    """Everything an action can do to the OS."""
+
+    @abstractmethod
+    def keys(self, combo: str) -> None:
+        """Tap a combo like 'ctrl+shift+z', 'alt+tab', 'win+h', 'f5'."""
+
+    @abstractmethod
+    def key_down(self, key: str) -> None: ...
+
+    @abstractmethod
+    def key_up(self, key: str) -> None: ...
+
+    @abstractmethod
+    def scroll(self, notches: float, horizontal: bool = False) -> None:
+        """Positive = down/right."""
+
+    @abstractmethod
+    def media(self, command: str) -> None:
+        """play_pause | next | previous | stop, delivered to the real media app."""
+
+    @abstractmethod
+    def launch(self, target: str) -> None:
+        """Open an app, file or URL."""
+
+    def active_window_title(self) -> str:
+        return ""
+
+
+class Platform(ABC):
+    name: str = "unknown"
+
+    @abstractmethod
+    def create_sources(self, cfg: dict) -> list[InputSource]: ...
+
+    @abstractmethod
+    def create_output(self, cfg: dict) -> Output: ...
+
+    def is_elevated(self) -> bool:
+        return True
+
+    def relaunch_elevated(self, argv: list[str]) -> bool:
+        return False

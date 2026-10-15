@@ -1,0 +1,177 @@
+"""Engine behaviour, no hardware or Qt. Run: python -m pytest -q"""
+import time
+
+import pytest
+
+from orbit.core import config as config_mod
+from orbit.core.engine import Engine, State
+from orbit.core.events import Capability, InputEvent, Kind
+from orbit.platform.base import InputSource, Output, RotationSource
+
+
+class FakeOut(Output):
+    def __init__(self):
+        self.log = []
+
+    def keys(self, combo): self.log.append(("keys", combo))
+    def key_down(self, key): self.log.append(("down", key))
+    def key_up(self, key): self.log.append(("up", key))
+    def scroll(self, notches, horizontal=False): self.log.append(("scroll", notches))
+    def media(self, command): self.log.append(("media", command))
+    def launch(self, target): self.log.append(("launch", target))
+
+
+class FakeUI:
+    def __init__(self):
+        self.log = []
+
+    def wheel_open(self, items, index): self.log.append(("open", index))
+    def wheel_move(self, index, direction): self.log.append(("move", index, direction))
+    def wheel_commit(self, index): self.log.append(("commit", index))
+    def wheel_cancel(self): self.log.append(("cancel",))
+    def hud(self, h): self.log.append(("hud", h.title))
+
+
+class FakeRot(RotationSource):
+    capabilities = frozenset({Capability.ROTATE})
+
+    def __init__(self):
+        self.passthrough = None
+
+    def start(self, emit): ...
+    def stop(self): ...
+    def set_passthrough(self, on): self.passthrough = on
+    def level(self): return 0.5
+
+
+class FakeSrc(InputSource):
+    def __init__(self, caps):
+        self.capabilities = frozenset(caps)
+
+    def start(self, emit): ...
+    def stop(self): ...
+
+
+def make(caps=(Capability.CLICKS, Capability.HOLD)):
+    cfg, _ = config_mod.load()
+    rot = FakeRot()
+    out, ui = FakeOut(), FakeUI()
+    e = Engine(cfg, out, ui, [rot, FakeSrc(caps)])
+    return e, out, ui, rot
+
+
+def ev(kind, delta=0):
+    return InputEvent(kind, delta, "test")
+
+
+def test_starts_on_volume_with_passthrough():
+    e, out, ui, rot = make()
+    assert e.tool.id == "volume"
+    assert rot.passthrough is True
+
+
+def test_hold_opens_wheel_rotate_click_selects():
+    e, out, ui, rot = make()
+    e.handle(ev(Kind.HOLD))
+    assert e.state == State.WHEEL and rot.passthrough is False
+    e.handle(ev(Kind.ROTATE, 2))
+    e.handle(ev(Kind.CLICK))
+    assert e.tool.id == "scroll" and e.state == State.TOOL
+    assert rot.passthrough is False          # scroll consumes rotation
+    e.handle(ev(Kind.ROTATE, 1))
+    assert ("scroll", 1.0) in out.log
+
+
+def test_wheel_wraps_backwards():
+    e, *_ = make()
+    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.ROTATE, -1))
+    assert e.wheel_ids[e.index] == "voice"
+
+
+def test_hold_again_cancels():
+    e, out, ui, rot = make()
+    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.ROTATE, 3))
+    e.handle(ev(Kind.HOLD))
+    assert e.state == State.TOOL and e.tool.id == "volume" and rot.passthrough is True
+
+
+def test_one_shot_runs_and_keeps_tool():
+    e, out, *_ = make()
+    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.ROTATE, -1))   # voice
+    e.handle(ev(Kind.CLICK))
+    assert ("keys", "win+h") in out.log and e.tool.id == "volume"
+
+
+def test_timeout_selects_sticky_but_never_fires_action():
+    e, out, *_ = make()
+    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.ROTATE, 1))     # switcher
+    e._wheel_last = time.monotonic() - 99
+    e.tick()
+    assert e.tool.id == "switcher"
+    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.ROTATE, -2))    # voice (one-shot)
+    e._wheel_last = time.monotonic() - 99
+    e.tick()
+    assert e.tool.id == "switcher" and ("keys", "win+h") not in out.log
+
+
+def test_double_flips_last_tool():
+    e, *_ = make()
+    e.set_tool("zoom")
+    e.handle(ev(Kind.DOUBLE))
+    assert e.tool.id == "volume"
+    e.handle(ev(Kind.DOUBLE))        # volume's own double = media:next, not last_tool
+    assert e.tool.id == "volume"
+
+
+def test_volume_tool_media_gestures():
+    e, out, *_ = make()
+    e.handle(ev(Kind.CLICK))
+    e.handle(ev(Kind.DOUBLE))
+    e.handle(ev(Kind.TRIPLE))
+    assert [x for x in out.log if x[0] == "media"] == [("media", "play_pause"), ("media", "next"), ("media", "previous")]
+
+
+def test_switcher_holds_alt_and_commits_on_click():
+    e, out, *_ = make()
+    e.set_tool("switcher")
+    e.handle(ev(Kind.ROTATE, 1))
+    e.handle(ev(Kind.ROTATE, 1))
+    e.handle(ev(Kind.ROTATE, -1))
+    assert out.log == [("down", "alt"), ("keys", "tab"), ("keys", "tab"), ("keys", "shift+tab")]
+    e.handle(ev(Kind.CLICK))
+    assert out.log[-1] == ("up", "alt")
+
+
+def test_switcher_releases_alt_when_wheel_opens():
+    e, out, *_ = make()
+    e.set_tool("switcher")
+    e.handle(ev(Kind.ROTATE, 1))
+    e.handle(ev(Kind.HOLD))
+    assert ("up", "alt") in out.log
+
+
+def test_no_hold_source_falls_back_to_triple():
+    e, *_ = make(caps=(Capability.CLICKS,))
+    e.handle(ev(Kind.TRIPLE))
+    assert e.state == State.WHEEL
+
+
+def test_press_release_quick_select():
+    e, *_ = make(caps=(Capability.CLICKS, Capability.PRESS_RELEASE))
+    e.handle(ev(Kind.PRESS))
+    e.handle(ev(Kind.ROTATE, 3))
+    assert e.state == State.WHEEL
+    e.handle(ev(Kind.RELEASE))
+    assert e.state == State.TOOL and e.tool.id == "zoom"
+
+
+def test_bad_config_rejected():
+    cfg, _ = config_mod.load()
+    cfg["tools"]["x"] = {"type": "keys", "rotate_cw": "teleport:mars"}
+    with pytest.raises(ValueError):
+        config_mod.validate(cfg)

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
+*.etl
+silence.wav
+dial_log.txt
+trace/hold.etl

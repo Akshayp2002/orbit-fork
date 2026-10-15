@@ -1,0 +1,176 @@
+"""App wiring: config -> platform sources/output -> engine <-> Qt UI.
+
+Threading: sources fire from their own threads; the Bus hops every event onto
+the Qt main thread, so the engine and UI never need locks.
+"""
+from __future__ import annotations
+
+import argparse
+import logging
+import logging.handlers
+import os
+import sys
+from pathlib import Path
+
+from PySide6.QtCore import QLockFile, QObject, QTimer, Qt, Signal
+from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+
+from orbit.core import config as config_mod
+from orbit.core.engine import Engine
+from orbit.core.events import InputEvent
+from orbit.platform import get_platform
+from orbit.ui import assets
+from orbit.ui.qtui import QtUI
+
+log = logging.getLogger("orbit")
+
+
+def data_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA") if sys.platform == "win32" else None
+    d = Path(base) / "Orbit" if base else Path.home() / ".orbit"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def setup_logging(debug: bool):
+    fmt = logging.Formatter("%(asctime)s.%(msecs)03d %(levelname).1s %(name)s: %(message)s", "%H:%M:%S")
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG if debug else logging.INFO)
+    fh = logging.handlers.RotatingFileHandler(data_dir() / "orbit.log", maxBytes=1_000_000, backupCount=2,
+                                              encoding="utf-8")
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+    for noisy in ("comtypes", "asyncio"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    if sys.stdout:
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
+
+
+class Bus(QObject):
+    event = Signal(object)
+
+    def post(self, ev: InputEvent):  # any thread
+        self.event.emit(ev)
+
+
+def tray_icon(accent: str) -> QIcon:
+    pm = QPixmap(64, 64)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor("#15171c"))
+    p.drawEllipse(2, 2, 60, 60)
+    p.setBrush(Qt.NoBrush)
+    p.setPen(QPen(QColor(accent), 6, Qt.SolidLine, Qt.RoundCap))
+    p.drawArc(12, 12, 40, 40, 60 * 16, 300 * 16)
+    p.end()
+    return QIcon(pm)
+
+
+def parse_args(argv):
+    ap = argparse.ArgumentParser(prog="orbit", description="Dial + wheel menu for CMF Buds Pro 2")
+    ap.add_argument("--config", help="path to config.toml")
+    ap.add_argument("--no-elevate", action="store_true", help="don't ask for admin (press-and-hold stays off)")
+    ap.add_argument("--dev", action="store_true", help="accept injected events on udp 127.0.0.1:47800")
+    ap.add_argument("--debug", action="store_true")
+    return ap.parse_args(argv)
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    args = parse_args(argv)
+    setup_logging(args.debug)
+
+    plat = get_platform()
+    if not plat.is_elevated() and not args.no_elevate:
+        log.info("asking for admin (needed to read press-and-hold)")
+        if plat.relaunch_elevated(["-m", "orbit", *argv]):
+            return 0
+        log.warning("elevation declined — continuing without press-and-hold")
+
+    QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    app = QApplication(sys.argv[:1])
+    app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("Orbit")
+
+    lock = QLockFile(str(data_dir() / "orbit.lock"))
+    lock.setStaleLockTime(0)
+    if not lock.tryLock(100):
+        log.error("Orbit is already running")
+        return 1
+
+    cfg, cfg_path = config_mod.load(args.config)
+    log.info("config: %s", cfg_path)
+
+    sources = plat.create_sources(cfg)
+    if args.dev:
+        from orbit.platform.dev import UdpDevSource
+        sources.append(UdpDevSource())
+    out = plat.create_output(cfg)
+    ui = QtUI(cfg, assets.ensure_sounds(data_dir() / "sounds"))
+    engine = Engine(cfg, out, ui, sources)
+
+    bus = Bus()
+    bus.event.connect(engine.handle, Qt.QueuedConnection)
+    for s in sources:
+        try:
+            s.start(bus.post)
+            log.info("source up: %s%s", s.describe(), "" if s.available else " (unavailable)")
+        except Exception:
+            log.exception("source failed: %s", s.name)
+
+    ticker = QTimer()
+    ticker.setInterval(50)
+    ticker.timeout.connect(engine.tick)
+    ticker.start()
+
+    # ---- tray
+    tray = QSystemTrayIcon(tray_icon(cfg["ui"]["accent"]))
+    tray.setToolTip("Orbit — hold the dial to open the wheel")
+    menu = QMenu()
+    a_cfg = QAction("Open config")
+    a_cfg.triggered.connect(lambda: out.launch(str(cfg_path)))
+    a_log = QAction("Open log")
+    a_log.triggered.connect(lambda: out.launch(str(data_dir() / "orbit.log")))
+    a_wheel = QAction("Show wheel")
+    a_wheel.triggered.connect(engine.open_wheel)
+    a_restart = QAction("Restart (reload config)")
+    a_quit = QAction("Quit")
+    a_quit.triggered.connect(app.quit)
+
+    def restart():
+        app.quit()
+        import subprocess
+        extra = [] if plat.is_elevated() or "--no-elevate" in argv else ["--no-elevate"]
+        subprocess.Popen([sys.executable, "-m", "orbit", *extra, *argv],
+                         creationflags=0x08000000 if sys.platform == "win32" else 0)
+
+    a_restart.triggered.connect(restart)
+    for a in (a_wheel, a_cfg, a_log, a_restart):
+        menu.addAction(a)
+    menu.addSeparator()
+    menu.addAction(a_quit)
+    tray.setContextMenu(menu)
+    tray.show()
+
+    def shutdown():
+        engine.shutdown()
+        for s in sources:
+            try:
+                s.stop()
+            except Exception:
+                pass
+        lock.unlock()
+
+    app.aboutToQuit.connect(shutdown)
+    log.info("Orbit running — tool: %s, wheel: %s, caps: %s", engine.tool.id, engine.wheel_ids,
+             sorted(c.value for c in engine.caps))
+    return app.exec()

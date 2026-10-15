@@ -1,0 +1,204 @@
+"""Gesture engine: one state machine, no OS or UI code.
+
+States
+  TOOL   dial drives the active tool (default state)
+  WHEEL  wheel menu is open; rotate moves the highlight, click commits
+
+Gesture model (adapts to what the sources can deliver):
+  hold                -> open wheel        (or `gestures.open_wheel_fallback` if no source has HOLD)
+  in wheel: rotate    -> move highlight
+            click     -> commit highlighted item
+            hold      -> close without change
+            double/triple -> close without change
+            idle      -> close without change after wheel.dismiss_after_ms
+  with PRESS_RELEASE (future firmware decoding):
+            press + turn -> wheel opens instantly, release commits (quick-select)
+"""
+from __future__ import annotations
+
+import logging
+import time
+from enum import Enum
+from typing import Protocol
+
+from orbit.core import actions, tools
+from orbit.core.events import Capability, InputEvent, Kind
+from orbit.core.tools import Hud, Tool
+from orbit.platform.base import InputSource, Output, RotationSource
+
+log = logging.getLogger("orbit.engine")
+
+
+class UI(Protocol):
+    def wheel_open(self, items: list[dict], index: int) -> None: ...
+    def wheel_move(self, index: int, direction: int) -> None: ...
+    def wheel_commit(self, index: int) -> None: ...
+    def wheel_cancel(self) -> None: ...
+    def hud(self, h: Hud) -> None: ...
+
+
+class State(Enum):
+    TOOL = "tool"
+    WHEEL = "wheel"
+
+
+class Engine:
+    def __init__(self, cfg: dict, out: Output, ui: UI, sources: list[InputSource]):
+        self.cfg = cfg
+        self.out = out
+        self.ui = ui
+        self.sources = sources
+        self.rotation_sources = [s for s in sources if isinstance(s, RotationSource)]
+        caps = set().union(*(s.capabilities for s in sources if s.available)) if sources else set()
+        self.caps = caps
+
+        self.tools: dict[str, Tool] = {tid: tools.build(tid, tc) for tid, tc in cfg["tools"].items()}
+        self.wheel_ids: list[str] = [i for i in cfg["wheel"]["items"] if i in self.tools]
+        self.gestures = {g: actions.parse(a) for g, a in cfg["gestures"].items() if g != "open_wheel_fallback"}
+        # The gesture that opens the wheel always wins over tool-level bindings.
+        self.open_with = "hold"
+        if Capability.HOLD not in caps and Capability.PRESS_RELEASE not in caps:
+            self.open_with = cfg["gestures"].get("open_wheel_fallback", "triple")
+            log.warning("no HOLD source available; wheel opens with '%s'", self.open_with)
+
+        self.dismiss_after = cfg["wheel"].get("dismiss_after_ms", 6000) / 1000
+        self.timeout_selects = cfg["wheel"].get("on_timeout", "select") == "select"
+        self.state = State.TOOL
+        self.tool: Tool = self.tools[cfg.get("default_tool", self.wheel_ids[0])]
+        self.prev_tool: Tool | None = None
+        self.index = 0
+        self._wheel_last = 0.0
+        self._pressed_at: float | None = None
+        self._quick = False
+        self._sync_passthrough()
+
+    # ------------------------------------------------------------------ public
+    def handle(self, ev: InputEvent) -> None:
+        log.debug("%s  [%s/%s]", ev, self.state.value, self.tool.id)
+        if ev.kind == Kind.PRESS:
+            self._pressed_at = ev.t
+            return
+        if ev.kind == Kind.RELEASE:
+            self._pressed_at = None
+            if self._quick:
+                self._quick = False
+                self._commit()
+            return
+
+        if self.state == State.WHEEL:
+            self._wheel_event(ev)
+        else:
+            self._tool_event(ev)
+
+    def tick(self) -> None:
+        now = time.monotonic()
+        self.tool.tick(self, now)
+        if self.state == State.WHEEL and not self._quick and now - self._wheel_last > self.dismiss_after:
+            # A press arrives ~0.4 s late (firmware waits for double/triple), so letting the
+            # highlight stand is the fast path. One-shot actions never fire on timeout.
+            if self.timeout_selects and self.tools[self.wheel_ids[self.index]].sticky:
+                self._commit()
+            else:
+                self._cancel()
+
+    def open_wheel(self) -> None:
+        if self.state == State.WHEEL or not self.wheel_ids:
+            return
+        self.tool.leave(self)
+        self.state = State.WHEEL
+        self.index = self.wheel_ids.index(self.tool.id) if self.tool.id in self.wheel_ids else 0
+        self._wheel_last = time.monotonic()
+        self._sync_passthrough()
+        self.ui.wheel_open([self.tools[i].to_item() for i in self.wheel_ids], self.index)
+
+    def set_tool(self, tid: str) -> None:
+        if tid not in self.tools:
+            log.error("unknown tool '%s'", tid)
+            return
+        self.tool.leave(self)
+        self._switch_to(self.tools[tid])
+        self.tool.enter(self)
+        self._sync_passthrough()
+        self.ui.hud(self.tool.hud(self))
+
+    def last_tool(self) -> None:
+        if self.prev_tool:
+            self.set_tool(self.prev_tool.id)
+
+    def _switch_to(self, t: Tool) -> None:
+        if t is not self.tool:
+            self.prev_tool = self.tool
+            self.tool = t
+
+    def rotation_level(self) -> float | None:
+        for s in self.rotation_sources:
+            lvl = s.level()
+            if lvl is not None:
+                return lvl
+        return None
+
+    def shutdown(self) -> None:
+        self.tool.leave(self)
+
+    # ------------------------------------------------------------------ states
+    def _tool_event(self, ev: InputEvent) -> None:
+        if ev.kind == Kind.ROTATE:
+            if self._pressed_at is not None and Capability.PRESS_RELEASE in self.caps:
+                self._quick = True       # press + turn -> quick-select wheel
+                self.open_wheel()
+                self._wheel_event(ev)
+                return
+            h = self.tool.rotate(self, ev.delta)
+            if h:
+                self.ui.hud(h)
+            return
+
+        name = ev.kind.value
+        if name == self.open_with:
+            self.open_wheel()
+            return
+        handled = self.tool.gesture(self, name)
+        if handled is False:
+            a = self.gestures.get(name, actions.NOOP)
+            a(self)
+            if a is not actions.NOOP and self.state == State.TOOL:
+                self.ui.hud(Hud(self.tool.icon, self.tool.label, str(a)))
+        elif isinstance(handled, Hud):
+            self.ui.hud(handled)
+
+    def _wheel_event(self, ev: InputEvent) -> None:
+        self._wheel_last = time.monotonic()
+        if ev.kind == Kind.ROTATE:
+            n = len(self.wheel_ids)
+            self.index = (self.index + ev.delta) % n
+            self.ui.wheel_move(self.index, 1 if ev.delta > 0 else -1)
+        elif ev.kind == Kind.CLICK:
+            self._commit()
+        elif ev.kind in (Kind.HOLD, Kind.DOUBLE, Kind.TRIPLE):
+            self._cancel()
+
+    def _commit(self) -> None:
+        item = self.tools[self.wheel_ids[self.index]]
+        self.ui.wheel_commit(self.index)
+        self.state = State.TOOL
+        if item.sticky:
+            self._switch_to(item)
+            item.enter(self)
+            self._sync_passthrough()
+            self.ui.hud(item.hud(self))
+        else:
+            self._sync_passthrough()
+            self.tool.enter(self)
+            self.ui.hud(item.fire(self))
+
+    def _cancel(self) -> None:
+        self.state = State.TOOL
+        self._quick = False
+        self.ui.wheel_cancel()
+        self.tool.enter(self)
+        self._sync_passthrough()
+
+    def _sync_passthrough(self) -> None:
+        on = self.state == State.TOOL and self.tool.rotation_passthrough
+        for s in self.rotation_sources:
+            s.set_passthrough(on)
