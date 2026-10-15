@@ -27,7 +27,7 @@ jobs:
         run: python tools/render_overlay.py overlay-${{ matrix.os }}
       - name: macOS API smoke test
         if: runner.os == 'macOS'
-        run: python tools/mac_smoke.py
+        run: python -u tools/mac_smoke.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

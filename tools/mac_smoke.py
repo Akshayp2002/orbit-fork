@@ -4,10 +4,13 @@
 Exit code 0 when every step either works or is clearly unavailable on this
 machine (e.g. no audio output on a CI runner); 1 on an unexpected error.
 """
+import faulthandler
 import sys
 import time
 import traceback
 from pathlib import Path
+
+faulthandler.enable()          # a native crash prints the Python stack instead of just "139"
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -34,7 +37,7 @@ def coreaudio():
         d = outs[0][0]
         h = ca.add_volume_listener(d, lambda: None)
         ca.remove_volume_listener(h)
-    ca.add_devices_listener(lambda: None)
+    ca.remove_devices_listener(ca.add_devices_listener(lambda: None))
     return f"{len(devs)} devices, {len(outs)} outputs"
 
 

@@ -122,24 +122,50 @@ def set_volume(dev: int, level: float):
     _check(_AT.AudioHardwareServiceSetPropertyData(dev, byref(a), 0, None, 4, byref(v)), "set volume")
 
 
+# Every registered ctypes callback lives here until it is removed: if one were
+# garbage-collected while CoreAudio still holds its pointer, the next notification
+# would jump into freed memory and crash the process.
+_alive: set = set()
+
+
+def _proc(cb):
+    def call(obj, n, addrs, ctx):
+        try:
+            cb()
+        except Exception:
+            log.exception("CoreAudio listener failed")
+        return 0
+    return Listener(call)
+
+
 def add_volume_listener(dev: int, cb) -> object:
     """cb() is called (HAL thread) whenever the device's main volume changes.
-    Returns a handle for remove_volume_listener; keep it alive."""
-    proc = Listener(lambda obj, n, addrs, ctx: (cb(), 0)[1])
+    Returns a handle for remove_volume_listener."""
+    proc = _proc(cb)
     a = Addr(VMVC, OUTPUT, MAIN)
     _check(_AT.AudioHardwareServiceAddPropertyListener(dev, byref(a), proc, None), "add volume listener")
-    return (dev, proc)
+    handle = (dev, proc)
+    _alive.add(handle)
+    return handle
 
 
 def remove_volume_listener(handle):
     dev, proc = handle
     a = Addr(VMVC, OUTPUT, MAIN)
     _AT.AudioHardwareServiceRemovePropertyListener(dev, byref(a), proc, None)
+    _alive.discard(handle)
 
 
 def add_devices_listener(cb) -> object:
-    """cb() on any device-list change (connect/disconnect). Keep the handle alive."""
-    proc = Listener(lambda obj, n, addrs, ctx: (cb(), 0)[1])
+    """cb() on any device-list change (connect/disconnect). Returns a handle."""
+    proc = _proc(cb)
     a = Addr(DEVICES, GLOBAL, MAIN)
     _check(_CA.AudioObjectAddPropertyListener(SYSTEM, byref(a), proc, None), "add devices listener")
+    _alive.add(proc)
     return proc
+
+
+def remove_devices_listener(proc):
+    a = Addr(DEVICES, GLOBAL, MAIN)
+    _CA.AudioObjectRemovePropertyListener(SYSTEM, byref(a), proc, None)
+    _alive.discard(proc)

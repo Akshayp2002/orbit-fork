@@ -54,6 +54,10 @@ class MacVolumeRotationSource(RotationSource):
         self._rebind.set()
         if self._listener:
             ca.remove_volume_listener(self._listener)
+            self._listener = None
+        if self._devices_listener:
+            ca.remove_devices_listener(self._devices_listener)
+            self._devices_listener = None
 
     def set_passthrough(self, on):
         if self.dial:

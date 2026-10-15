@@ -7,3 +7,8 @@ silence.wav
 dial_log.txt
 trace/hold.etl
 tools/*.txt
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+.idea/
