@@ -7,6 +7,7 @@ small settings.json next to the user config and this module applies it on load:
       "wheel": {"order": ["volume", "scroll", ...],     # every tool, in wheel order
                 "enabled": ["volume", "scroll"]},       # the ones switched on
       "default_tool": "volume",
+      "appearance": "system",                           # system | dark | light
       "gestures": {"click": "media:play_pause", "double": "open_wheel",
                    "triple": "last_tool", "hold": ["keys:ctrl+alt+v", "..."]}
     }
@@ -80,6 +81,8 @@ def apply(cfg: dict, s: dict) -> dict:
         items = [t for t in order if t in enabled]
         if items:
             cfg["wheel"]["items"] = items[:12]
+    if s.get("appearance") in config_mod.APPEARANCES:
+        cfg["ui"]["appearance"] = s["appearance"]
     dt = s.get("default_tool")
     if dt in cfg["tools"]:
         cfg["default_tool"] = dt

@@ -16,10 +16,12 @@ DEFAULTS: dict = {
         "open_wheel_fallback": "triple",
     },
     "wheel": {"items": [], "dismiss_after_ms": 6000, "duck_volume": 0.5, "accel": 1},
-    "ui": {"hud_ms": 1400, "scale": 1.0, "accent": "#7C9CFF", "hide_os_volume_flyout": True},
+    "ui": {"hud_ms": 1400, "scale": 1.0, "accent": "#7C9CFF", "hide_os_volume_flyout": True,
+           "appearance": "dark"},
     "tools": {},
 }
 
+APPEARANCES = ("system", "dark", "light")
 PROJECT_CONFIG = Path(__file__).resolve().parents[2] / "config.toml"
 
 
@@ -96,6 +98,8 @@ def validate(cfg: dict) -> None:
         cfg["wheel"]["items"] = list(cfg["tools"])
     if len(cfg["wheel"]["items"]) > 12:
         raise ValueError("config: more than 12 wheel items is unusable on a dial; keep it to 8 or fewer")
+    if cfg["ui"].get("appearance") not in APPEARANCES:
+        raise ValueError(f"config: ui.appearance must be one of {list(APPEARANCES)}")
     dt = cfg.get("default_tool")
     if dt and dt not in cfg["tools"]:
         raise ValueError(f"config: default_tool '{dt}' is not a tool")

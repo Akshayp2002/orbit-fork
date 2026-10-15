@@ -29,6 +29,7 @@ qInstallMessageHandler(lambda mode, ctx, msg: warnings.append(msg))
 app = QApplication(sys.argv[:1])
 cfg, _ = config.load()
 cfg["wheel"]["dismiss_after_ms"] = 60000
+cfg["ui"]["appearance"] = os.environ.get("ORBIT_APPEARANCE", cfg["ui"]["appearance"])
 ui = QtUI(cfg)
 wheel_win, hud_win = (shiboken6.wrapInstance(shiboken6.getCppPointer(w)[0], QQuickWindow) for w in ui.windows)
 items = [tools.build(i, cfg["tools"][i]).to_item() for i in cfg["wheel"]["items"]]
@@ -39,7 +40,7 @@ def painted(img, step=5):
     n = 0
     for x in range(0, img.width(), step):
         for y in range(0, img.height(), step):
-            if img.pixelColor(x, y).alpha() > 200:
+            if img.pixelColor(x, y).alpha() > 120:     # glass is ~60% opaque
                 n += 1
     return n
 

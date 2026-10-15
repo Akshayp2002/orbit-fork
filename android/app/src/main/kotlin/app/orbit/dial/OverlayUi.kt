@@ -8,6 +8,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -38,6 +40,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -57,10 +60,30 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 // Same palette and proportions as the desktop QML overlay.
-private val Accent = Color(0xFF7C9CFF)
-private val Ink = Color(0xFFF4F6FB)
-private val InkDim = Color(0x85FFFFFF)
-private val Glass = Color(0xFF13151A)
+/** The overlay palette for dark or light; the highlighted item is the light source. */
+data class OverlayLook(val dark: Boolean) {
+    val accent = if (dark) Color(0xFF7C9CFF) else Color(0xFF4F67C4)
+    val ink = if (dark) Color(0xFFF4F6FB) else Color(0xFF12141A)
+    val inkDim = if (dark) Color(0x80FFFFFF) else Color(0x7A0D0F17)
+    val surface = if (dark) Color(0xFF0A0B0F) else Color(0xFFFBFBFE)
+    val edge = if (dark) Color(0x12FFFFFF) else Color(0x14000000)
+    val light = if (dark) 1f else 0.8f
+    fun fg(a: Float) = if (dark) Color.White.copy(alpha = a) else Color(0xFF0D0F17).copy(alpha = a)
+}
+
+val LocalOverlayLook = staticCompositionLocalOf { OverlayLook(dark = true) }
+
+@Composable
+fun rememberOverlayLook(appearance: String): OverlayLook {
+    val system = isSystemInDarkTheme()
+    val dark = when (appearance) { "dark" -> true; "light" -> false; else -> system }
+    return remember(dark) { OverlayLook(dark) }
+}
+
+private val Accent: Color @Composable get() = LocalOverlayLook.current.accent
+private val Ink: Color @Composable get() = LocalOverlayLook.current.ink
+private val InkDim: Color @Composable get() = LocalOverlayLook.current.inkDim
+private val Glass: Color @Composable get() = LocalOverlayLook.current.surface
 
 @SuppressLint("DiscouragedApi")
 @Composable
@@ -106,37 +129,65 @@ fun WheelOverlay(s: OverlayState) {
 
     val dia = 300.dp
     val rad = 103.dp
-    Box(Modifier.size(dia + 40.dp), contentAlignment = Alignment.Center) {
+    val look = LocalOverlayLook.current
+    Box(Modifier.size(dia + 92.dp), contentAlignment = Alignment.Center) {
         if (alpha.value <= 0.001f && !s.shown) return@Box
-        Box(
-            Modifier.size(dia).graphicsLayer {
-                this.alpha = alpha.value; scaleX = scale.value; scaleY = scale.value; rotationZ = spin.value
-            }.shadow(18.dp, CircleShape).background(Glass, CircleShape)
-                .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Canvas(Modifier.size(dia)) {
+        Box(Modifier.size(dia + 92.dp).graphicsLayer {
+            this.alpha = alpha.value; scaleX = scale.value; scaleY = scale.value; rotationZ = spin.value
+        }, contentAlignment = Alignment.Center) {
+            // light spilling past the rim, nearest the highlighted item (drawn under the disc)
+            Canvas(Modifier.size(dia + 92.dp)) {
                 val c = Offset(size.width / 2, size.height / 2)
-                val rimR = size.width / 2 - 12.dp.toPx()
-                drawCircle(Color.White.copy(alpha = 0.07f), rimR, c, style = Stroke(1.dp.toPx()))
-                for (i in 0 until n) {
-                    if (i == s.index) continue
-                    val a = Math.toRadians((i * step).toDouble())
-                    val p1 = Offset(c.x + (rimR - 3.dp.toPx()) * sin(a).toFloat(), c.y - (rimR - 3.dp.toPx()) * cos(a).toFloat())
-                    val p2 = Offset(c.x + (rimR + 3.dp.toPx()) * sin(a).toFloat(), c.y - (rimR + 3.dp.toPx()) * cos(a).toFloat())
-                    drawLine(Color.White.copy(alpha = 0.18f), p1, p2, 2.dp.toPx(), StrokeCap.Round)
-                }
-                val sweep = min(step * 0.62f, 70f)
-                val tl = Offset(c.x - rimR, c.y - rimR)
-                val sz = Size(rimR * 2, rimR * 2)
-                drawArc(Accent.copy(alpha = 0.22f), sel - 90f - sweep / 2, sweep, false, tl, sz, style = Stroke(12.dp.toPx(), cap = StrokeCap.Round))
-                drawArc(Accent, sel - 90f - sweep / 2, sweep, false, tl, sz, style = Stroke(3.5f.dp.toPx(), cap = StrokeCap.Round))
+                val R = dia.toPx() / 2
                 val a = Math.toRadians(sel.toDouble())
-                val pc = Offset(c.x + rad.toPx() * sin(a).toFloat(), c.y - rad.toPx() * cos(a).toFloat())
-                val pr = 26.dp.toPx() * pulse.value
-                drawCircle(Accent.copy(alpha = 0.20f), pr, pc)
-                drawCircle(Accent.copy(alpha = 0.55f), pr, pc, style = Stroke(1.dp.toPx()))
+                val lp = Offset(c.x + rad.toPx() * sin(a).toFloat(), c.y - rad.toPx() * cos(a).toFloat())
+                val k = look.light * (0.75f + 0.25f * pulse.value)
+                drawCircle(
+                    Brush.radialGradient(
+                        0f to look.accent.copy(alpha = 0.30f * k), 0.18f to look.accent.copy(alpha = 0.20f * k),
+                        0.40f to look.accent.copy(alpha = 0.07f * k), 0.70f to look.accent.copy(alpha = 0.015f * k),
+                        1f to Color.Transparent, center = lp, radius = R * 0.84f),
+                    radius = R + 23.dp.toPx(), center = c, style = Stroke(46.dp.toPx()))
             }
+            Box(
+                Modifier.size(dia).shadow(18.dp, CircleShape).background(Glass, CircleShape)
+                    .border(1.dp, look.edge, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(Modifier.size(dia)) {
+                    val c = Offset(size.width / 2, size.height / 2)
+                    val R = size.width / 2
+                    val a = Math.toRadians(sel.toDouble())
+                    val lp = Offset(c.x + rad.toPx() * sin(a).toFloat(), c.y - rad.toPx() * cos(a).toFloat())
+                    val k = look.light * (0.75f + 0.25f * pulse.value)
+                    // light across the disc, natural falloff from the item
+                    drawCircle(
+                        Brush.radialGradient(
+                            0f to look.accent.copy(alpha = 0.34f * k), 0.08f to look.accent.copy(alpha = 0.24f * k),
+                            0.20f to look.accent.copy(alpha = 0.12f * k), 0.38f to look.accent.copy(alpha = 0.05f * k),
+                            0.60f to look.accent.copy(alpha = 0.015f * k), 1f to Color.Transparent,
+                            center = lp, radius = size.width * 0.62f),
+                        radius = R - 1f, center = c)
+                    // the rim catching it: brightest nearest the item, fading both ways
+                    val rr = R - 0.75.dp.toPx()
+                    val sw = min(step * 1.1f, 96f)
+                    val tl = Offset(c.x - rr, c.y - rr)
+                    val sz = Size(rr * 2, rr * 2)
+                    for ((span, al) in listOf(2f to 0.10f, 1.1f to 0.25f, 0.5f to 0.55f)) {
+                        drawArc(look.accent.copy(alpha = al * k), sel - 90f - sw * span / 2, sw * span, false, tl, sz,
+                            style = Stroke(1.5.dp.toPx(), cap = if (span < 1f) StrokeCap.Round else StrokeCap.Butt))
+                    }
+                    // faint track + ticks
+                    val rimR = R - 12.dp.toPx()
+                    drawCircle(look.fg(0.06f), rimR, c, style = Stroke(1.dp.toPx()))
+                    for (i in 0 until n) {
+                        if (i == s.index) continue
+                        val t = Math.toRadians((i * step).toDouble())
+                        val p1 = Offset(c.x + (rimR - 3.dp.toPx()) * sin(t).toFloat(), c.y - (rimR - 3.dp.toPx()) * cos(t).toFloat())
+                        val p2 = Offset(c.x + (rimR + 3.dp.toPx()) * sin(t).toFloat(), c.y - (rimR + 3.dp.toPx()) * cos(t).toFloat())
+                        drawLine(look.fg(0.16f), p1, p2, 2.dp.toPx(), StrokeCap.Round)
+                    }
+                }
             s.items.forEachIndexed { i, item ->
                 val t = ((openT.value * 1.6f) - i * 0.06f).coerceIn(0f, 1f)
                 val r = rad.value * (0.72f + 0.28f * t)
@@ -148,7 +199,7 @@ fun WheelOverlay(s: OverlayState) {
                         .size(48.dp).alpha(t * if (selected) 1f else 0.7f).scale(itemScale),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(painterResource(orbitIcon(item.icon)), item.label, Modifier.size(22.dp), tint = if (selected) Ink else InkDim)
+                    Icon(painterResource(orbitIcon(item.icon)), item.label, Modifier.size(22.dp), tint = if (selected) (if (look.dark) Color.White else Accent) else InkDim)
                     if (!item.sticky) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp).size(4.dp).background(Accent, CircleShape))
                 }
             }
@@ -158,8 +209,9 @@ fun WheelOverlay(s: OverlayState) {
                     Icon(painterResource(orbitIcon(cur.icon)), cur.label, Modifier.size(34.dp), tint = Accent)
                     Spacer(Modifier.size(6.dp))
                     Text(cur.label, color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (cur.sticky) "press to use" else "press to run", color = Color.White.copy(alpha = 0.38f), fontSize = 11.sp)
+                    Text(if (cur.sticky) "press to use" else "press to run", color = look.fg(0.40f), fontSize = 11.sp)
                 }
+            }
             }
         }
     }
@@ -216,7 +268,7 @@ private fun AppStripPanel(strip: app.orbit.dial.core.AppStrip, title: String, a:
     Column(
         Modifier.graphicsLayer { alpha = a; translationY = lift * density }
             .shadow(14.dp, RoundedCornerShape(26.dp)).background(Glass, RoundedCornerShape(26.dp))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(26.dp))
+            .border(1.dp, LocalOverlayLook.current.edge, RoundedCornerShape(26.dp))
             .padding(top = 14.dp, bottom = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -244,7 +296,7 @@ private fun AppStripPanel(strip: app.orbit.dial.core.AppStrip, title: String, a:
         Spacer(Modifier.size(6.dp))
         Text(title, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.size(8.dp))
-        Box(Modifier.size(96.dp, 3.dp).background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(2.dp))) {
+        Box(Modifier.size(96.dp, 3.dp).background(LocalOverlayLook.current.fg(0.10f), RoundedCornerShape(2.dp))) {
             Box(Modifier.fillMaxHeight().width(96.dp * countdown.value).background(Accent, RoundedCornerShape(2.dp)))
         }
     }
@@ -255,7 +307,7 @@ private fun HudPill(h: app.orbit.dial.core.Hud, a: Float, lift: Float, nudge: Fl
     Row(
         Modifier.graphicsLayer { alpha = a; translationY = lift * density }
             .shadow(10.dp, RoundedCornerShape(50)).background(Glass, RoundedCornerShape(50))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(50))
+            .border(1.dp, LocalOverlayLook.current.edge, RoundedCornerShape(50))
             .padding(start = 10.dp, end = 18.dp, top = 9.dp, bottom = 9.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -270,7 +322,7 @@ private fun HudPill(h: app.orbit.dial.core.Hud, a: Float, lift: Float, nudge: Fl
             }
             h.progress?.let { p ->
                 val pw by animateFloatAsState(p.coerceIn(0f, 1f), spring(0.6f, Spring.StiffnessMedium), label = "hudP")
-                Box(Modifier.width(140.dp).size(140.dp, 4.dp).background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(2.dp))) {
+                Box(Modifier.width(140.dp).size(140.dp, 4.dp).background(LocalOverlayLook.current.fg(0.10f), RoundedCornerShape(2.dp))) {
                     Box(Modifier.fillMaxHeight().width(140.dp * pw).background(Accent, RoundedCornerShape(2.dp)))
                 }
             }

@@ -43,6 +43,7 @@ class OverlayState {
     var hud by mutableStateOf<Hud?>(null)
     var hudShown by mutableStateOf(false)
     var hudSeq by mutableIntStateOf(0)
+    var appearance by mutableStateOf("system")      // system | dark | light
 }
 
 /**
@@ -67,7 +68,11 @@ class OverlayController(private val svc: AccessibilityService) : Ui {
             setViewTreeSavedStateRegistryOwner(owner)
             setViewTreeViewModelStoreOwner(owner)
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-            setContent { content() }
+            setContent {
+                androidx.compose.runtime.CompositionLocalProvider(LocalOverlayLook provides rememberOverlayLook(state.appearance)) {
+                    content()
+                }
+            }
         }
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,

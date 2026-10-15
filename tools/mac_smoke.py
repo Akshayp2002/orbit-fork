@@ -57,7 +57,20 @@ def output():
     o = MacOutput()
     o.keys("shift")            # harmless: posts nothing visible without Accessibility
     o.scroll(0.0)
-    return f"brightness={o.brightness_get()}"
+    o.scroll(0.2)              # posts a real 8 px scroll (dropped without Accessibility)
+    import Quartz as Q
+    from orbit.platform.mac.output import scroll_event
+    e = scroll_event(-24)
+    assert Q.CGEventGetType(e) == Q.kCGEventScrollWheel, Q.CGEventGetType(e)
+    assert Q.CGEventGetIntegerValueField(e, Q.kCGScrollWheelEventPointDeltaAxis1) == -24
+    assert Q.CGEventGetIntegerValueField(e, Q.kCGScrollWheelEventDeltaAxis1) == -2
+    assert Q.CGEventGetIntegerValueField(e, Q.kCGScrollWheelEventIsContinuous) == 1
+    cur = Q.CGEventGetLocation(Q.CGEventCreate(None))
+    loc = Q.CGEventGetLocation(e)
+    assert (loc.x, loc.y) == (cur.x, cur.y), (loc, cur)
+    h = scroll_event(30, horizontal=True)
+    assert Q.CGEventGetIntegerValueField(h, Q.kCGScrollWheelEventPointDeltaAxis2) == 30
+    return f"brightness={o.brightness_get()} scroll event ok at {loc.x:.0f},{loc.y:.0f}"
 
 
 def media_and_overlay():

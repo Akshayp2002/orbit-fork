@@ -13,7 +13,8 @@ from typing import Callable
 
 from PySide6.QtCore import (QEasingCurve, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QUrl,
                             QVariantAnimation, Property)
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import (QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QPainter, QPen, QPixmap,
+                           QRadialGradient)
 from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
                                QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
@@ -41,6 +42,7 @@ PRESETS = [
     ("Nothing", "none"),
 ]
 MAX_ITEMS = 12
+APPEARANCES = [("Match system", "system"), ("Dark", "dark"), ("Light", "light")]
 
 
 def _summary(act) -> str:
@@ -148,6 +150,7 @@ class WheelPreview(QWidget):
         self.accent = QColor(accent)
         self.items: list[tuple[str, str, str]] = []      # (id, label, icon)
         self.start = ""
+        self.dark = True
         self._from: dict[str, float] = {}
         self._to: dict[str, float] = {}
         self._t = 1.0
@@ -155,7 +158,7 @@ class WheelPreview(QWidget):
         self._anim = QVariantAnimation(self, startValue=0.0, endValue=1.0, duration=420)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.valueChanged.connect(self._step)
-        self.setMinimumSize(260, 260)
+        self.setMinimumSize(290, 290)
 
     def _step(self, v):
         self._t = v
@@ -170,6 +173,10 @@ class WheelPreview(QWidget):
         self._t = 0.0
         self._anim.stop()
         self._anim.start()
+
+    def set_look(self, dark: bool):
+        self.dark = dark
+        self.update()
 
     def _angles(self) -> dict[str, float]:
         out = {}
@@ -189,39 +196,61 @@ class WheelPreview(QWidget):
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        side = min(self.width(), self.height()) - 8
+        side = min(self.width(), self.height()) - 60
         c = QPointF(self.width() / 2, self.height() / 2)
         R = side / 2
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 90))
-        p.drawEllipse(c + QPointF(0, 6), R, R)                 # soft offset shadow
-        p.setBrush(QColor("#13151A"))
-        p.drawEllipse(c, R, R)
-        p.setPen(QPen(QColor(255, 255, 255, 18), 1))
-        p.setBrush(Qt.NoBrush)
-        rim = R - 12
-        p.drawEllipse(c, rim, rim)
+        dark = self.dark
+        acc = QColor(self.accent) if dark else QColor(self.accent).darker(132)
+        ink, ink2 = (QColor(INK), QColor(INK2)) if dark else (QColor("#12141A"), QColor("#6B7080"))
+
+        def a(alpha):
+            return QColor(acc.red(), acc.green(), acc.blue(), max(0, min(255, int(255 * alpha))))
+
         ang = self._angles()
         orbit_r = R * 0.68
+        lit_a = ang.get(self.start)
+        lp = None if lit_a is None else QPointF(c.x() + orbit_r * math.sin(math.radians(lit_a)),
+                                                c.y() - orbit_r * math.cos(math.radians(lit_a)))
+        k = 1.0 if dark else 0.8
+        # shadow, then light spilling past the rim (drawn under the disc)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 90 if dark else 36))
+        p.drawEllipse(c + QPointF(0, 6), R, R)
+        if lp is not None:
+            g = QRadialGradient(lp, R * 0.84)
+            for pos, al in ((0, 0.30), (0.18, 0.20), (0.40, 0.07), (0.70, 0.015), (1, 0)):
+                g.setColorAt(pos, a(al * k))
+            p.setBrush(g)
+            p.drawEllipse(c, R + 26, R + 26)
+        p.setBrush(QColor(10, 11, 15, 248) if dark else QColor(251, 251, 254, 248))
+        p.setPen(QPen(QColor(255, 255, 255, 18) if dark else QColor(0, 0, 0, 20), 1))
+        p.drawEllipse(c, R, R)
+        if lp is not None:                                     # light across the disc
+            g = QRadialGradient(lp, R * 1.24)
+            for pos, al in ((0, 0.34), (0.08, 0.24), (0.20, 0.12), (0.38, 0.05), (0.60, 0.015), (1, 0)):
+                g.setColorAt(pos, a(al * k))
+            p.setPen(Qt.NoPen)
+            p.setBrush(g)
+            p.drawEllipse(c, R - 1, R - 1)
+            for span, al in ((2.0, 0.10), (1.1, 0.25), (0.5, 0.55)):    # the rim catching it
+                p.setPen(QPen(a(al * k), 1.5, Qt.SolidLine, Qt.FlatCap))
+                sp = 16 * min(360 / max(len(self.items), 1) * 1.1, 96) * span
+                p.drawArc(QRectF(c.x() - R + 1, c.y() - R + 1, 2 * R - 2, 2 * R - 2), int((90 - lit_a) * 16 - sp / 2), int(sp))
+        rim = R - 12
+        p.setPen(QPen(QColor(ink.red(), ink.green(), ink.blue(), 16), 1))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(c, rim, rim)
         for tid, label, icon in self.items:
-            a = math.radians(ang.get(tid, 0))
-            pos = QPointF(c.x() + orbit_r * math.sin(a), c.y() - orbit_r * math.cos(a))
+            ia = math.radians(ang.get(tid, 0))
+            pos = QPointF(c.x() + orbit_r * math.sin(ia), c.y() - orbit_r * math.cos(ia))
             lit = tid == self.start
-            if lit:
-                p.setPen(Qt.NoPen)
-                p.setBrush(QColor(self.accent.red(), self.accent.green(), self.accent.blue(), 46))
-                p.drawEllipse(pos, 22, 22)
-                p.setPen(QPen(self.accent, 2.5, Qt.SolidLine, Qt.RoundCap))
-                span = 16 * 28
-                p.drawArc(QRectF(c.x() - rim, c.y() - rim, rim * 2, rim * 2),
-                          int((90 - ang.get(tid, 0)) * 16 - span / 2), int(span))
-            pm = self._glyph(icon, INK if lit else INK2)
-            p.drawPixmap(pos - QPointF(11, 11), pm)
-        p.setPen(QColor(INK))
+            col = (QColor("#FFFFFF") if dark else acc) if lit else ink2
+            p.drawPixmap(pos - QPointF(11, 11), self._glyph(icon, col.name()))
+        p.setPen(ink)
         p.setFont(_font(17, QFont.DemiBold))
         name = next((lbl for t, lbl, _ in self.items if t == self.start), "")
-        p.drawText(QRectF(c.x() - 80, c.y() - 22, 160, 24), Qt.AlignCenter, name or "—")
-        p.setPen(QColor(INK3))
+        p.drawText(QRectF(c.x() - 80, c.y() - 22, 160, 24), Qt.AlignCenter, name or "-")
+        p.setPen(ink2)
         p.setFont(_font(12))
         n = len(self.items)
         p.drawText(QRectF(c.x() - 80, c.y() + 2, 160, 20), Qt.AlignCenter,
@@ -404,6 +433,24 @@ class SettingsWindow(QWidget):
         v.addWidget(self.items_group)
 
         v.addSpacing(34)
+        v.addWidget(self._heading("Look"))
+        v.addSpacing(4)
+        v.addWidget(self._help("The highlighted item lights up the wheel around it."))
+        v.addSpacing(14)
+        look = _Group()
+        self.appearance_box = self._combo()
+        for lbl, val in APPEARANCES:
+            self.appearance_box.addItem(lbl, val)
+        self.appearance_box.setCurrentIndex(max(0, self.appearance_box.findData(merged["ui"].get("appearance", "dark"))))
+        self.appearance_box.currentIndexChanged.connect(lambda _: self.changed())
+        lead = QLabel()
+        lead.setPixmap(_icon("brightness", INK2).pixmap(16, 16))
+        lead.setFixedWidth(28)
+        look.box.addWidget(_ComboRow(lead, "Appearance", self.appearance_box))
+        look.restyle()
+        v.addWidget(look)
+
+        v.addSpacing(34)
         v.addWidget(self._heading("Dial"))
         v.addSpacing(4)
         v.addWidget(self._help("What the dial does when the wheel is closed."))
@@ -526,6 +573,7 @@ class SettingsWindow(QWidget):
         return {
             "wheel": {"order": list(self.order), "enabled": enabled},
             "default_tool": self.start.currentData(),
+            "appearance": self.appearance_box.currentData(),
             "gestures": {g: b.currentData() for g, b in self.gesture_boxes.items() if b.isEnabled()},
         }
 
@@ -533,6 +581,10 @@ class SettingsWindow(QWidget):
         s = self.collect()
         on = s["wheel"]["enabled"]
         self.preview.set_items([(t, self.tools[t].label, self.tools[t].icon) for t in on], s["default_tool"])
+        hints = QGuiApplication.styleHints()
+        system_dark = not hasattr(hints, "colorScheme") or hints.colorScheme() != Qt.ColorScheme.Light
+        a = s["appearance"]
+        self.preview.set_look(system_dark if a == "system" else a == "dark")
         opens = [GESTURE_NAMES[g].lower() for g, b in self.gesture_boxes.items()
                  if b.isEnabled() and b.currentData() == st.OPEN_WHEEL]
         self.how.setText(("Open it with a " + " or ".join(opens) + "." if opens else

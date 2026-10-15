@@ -24,7 +24,7 @@ os.environ.setdefault("QSG_RENDER_LOOP", "basic")
 if sys.platform == "win32":
     os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
+from PySide6.QtCore import Property, QObject, Qt, QUrl, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
@@ -43,10 +43,29 @@ class Bridge(QObject):
     # icon name, glyph fallback, title, detail, progress (-1 = none), direction
     hudShown = Signal(str, str, str, str, float, int)
     placed = Signal(int, int, int, int)
+    darkChanged = Signal()
 
     def __init__(self, cfg: dict):
         super().__init__()
         self._cfg = cfg
+        self._appearance = cfg["ui"].get("appearance", "dark")
+        hints = QGuiApplication.styleHints()
+        if hasattr(hints, "colorSchemeChanged"):                 # Qt 6.5+: follow the OS live
+            hints.colorSchemeChanged.connect(lambda *_: self.darkChanged.emit())
+
+    def _get_dark(self) -> bool:
+        if self._appearance == "system":
+            hints = QGuiApplication.styleHints()
+            return not hasattr(hints, "colorScheme") or hints.colorScheme() != Qt.ColorScheme.Light
+        return self._appearance == "dark"
+
+    def set_appearance(self, a: str):
+        if a != self._appearance:
+            self._appearance = a
+            self.darkChanged.emit()
+
+    dark = Property(bool, _get_dark, notify=darkChanged)
+
 
     @Property(str, constant=True)
     def accent(self):

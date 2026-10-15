@@ -38,6 +38,7 @@ hide_os_volume_flyout = true   # hide the Windows volume bar when the dial cause
 hud_ms = 1400       # how long the HUD pill stays after the last interaction
 scale = 1.0
 accent = "#7C9CFF"
+appearance = "dark" # dark | light | system (follows the OS)
 
 # ---------------------------------------------------------------- tools
 [tools.volume]

@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -84,6 +85,7 @@ private val PRESETS = listOf(
     "Nothing" to "none",
 )
 private const val MAX_ITEMS = 12
+private val APPEARANCES = listOf("Match system" to "system", "Dark" to "dark", "Light" to "light")
 
 /** Wheel items (Yes/No + order), the tool to start with, and what each press does.
  *  Every change is saved at once; the accessibility service rebuilds its engine. */
@@ -122,7 +124,7 @@ fun CustomizeScreen(onBack: () -> Unit) {
         LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = pad.calculateTopPadding(),
             bottom = pad.calculateBottomPadding() + 24.dp)) {
             item {
-                WheelPreview(wheel, s.defaultTool)
+                WheelPreview(wheel, s.defaultTool, rememberOverlayLook(s.appearance))
                 Text(
                     (if (opens.isEmpty()) "Open it with a triple press." else
                         "Open it with a " + opens.joinToString(" or ") { GESTURE_NAMES.getValue(it).lowercase() } + ".") +
@@ -152,6 +154,15 @@ fun CustomizeScreen(onBack: () -> Unit) {
                     }
                 }
                 if (s.enabled.size == 1) Hint("The wheel needs at least one item.")
+            }
+            item { Section("Look", "The highlighted item lights up the wheel around it.") }
+            item {
+                Group {
+                    PickerRow({ Icon(painterResource(R.drawable.ic_brightness), null, Modifier.size(20.dp)) },
+                        "Appearance", APPEARANCES.first { it.second == s.appearance }.first, APPEARANCES, s.appearance) {
+                        update(s.copy(appearance = it))
+                    }
+                }
             }
             item { Section("Dial", "What the dial does when the wheel is closed.") }
             item {
@@ -269,46 +280,58 @@ private fun Pips(k: Kind) {
     }
 }
 
-/** The wheel as the overlay draws it: enabled items around the ring, the start tool lit.
- *  Items glide to their new places when switched or reordered. */
+/** The wheel as the overlay draws it: enabled items around the ring, the start tool
+ *  lighting the wheel around it. Items and light glide when switched or reordered. */
 @Composable
-private fun WheelPreview(items: List<Tool>, start: String) {
-    val accent = MaterialTheme.colorScheme.primary
+private fun WheelPreview(items: List<Tool>, start: String, look: OverlayLook) {
     val n = items.size.coerceAtLeast(1)
-    val dia = 248.dp
-    val orbit = 84.dp
+    val dia = 236.dp
+    val orbit = 80.dp
+    val startIdx = items.indexOfFirst { it.id == start }
+    val lit by animateFloatAsState(if (startIdx < 0) 0f else startIdx * 360f / n,
+        spring(0.7f, Spring.StiffnessMediumLow), label = "lit")
     Box(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp), contentAlignment = Alignment.Center) {
-        Box(Modifier.size(dia).shadow(16.dp, CircleShape).background(Color(0xFF13151A), CircleShape),
-            contentAlignment = Alignment.Center) {
-            val startIdx = items.indexOfFirst { it.id == start }
-            val litAngle by animateFloatAsState(if (startIdx < 0) 0f else startIdx * 360f / n,
-                spring(0.7f, Spring.StiffnessMediumLow), label = "lit")
-            Canvas(Modifier.size(dia)) {
-                val c = Offset(size.width / 2, size.height / 2)
-                val rim = size.width / 2 - 12.dp.toPx()
-                drawCircle(Color.White.copy(alpha = 0.07f), rim, c, style = Stroke(1.dp.toPx()))
-                if (startIdx >= 0) {
-                    drawArc(accent, litAngle - 90f - 14f, 28f, false, Offset(c.x - rim, c.y - rim), Size(rim * 2, rim * 2),
-                        style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+        Canvas(Modifier.size(dia + 60.dp)) {
+            val c = Offset(size.width / 2, size.height / 2)
+            val R = dia.toPx() / 2
+            val a = Math.toRadians(lit.toDouble())
+            val lp = Offset(c.x + orbit.toPx() * sin(a).toFloat(), c.y - orbit.toPx() * cos(a).toFloat())
+            val k = look.light
+            if (startIdx >= 0) drawCircle(
+                Brush.radialGradient(0f to look.accent.copy(alpha = 0.30f * k), 0.18f to look.accent.copy(alpha = 0.20f * k),
+                    0.40f to look.accent.copy(alpha = 0.07f * k), 0.70f to look.accent.copy(alpha = 0.015f * k),
+                    1f to Color.Transparent, center = lp, radius = R * 0.84f),
+                radius = R + 15.dp.toPx(), center = c, style = Stroke(30.dp.toPx()))
+            drawCircle(Color.Black.copy(alpha = if (look.dark) 0.35f else 0.14f), R, c + Offset(0f, 6.dp.toPx()))
+            drawCircle(look.surface, R, c)
+            drawCircle(look.edge, R, c, style = Stroke(1.dp.toPx()))
+            if (startIdx >= 0) {
+                drawCircle(
+                    Brush.radialGradient(0f to look.accent.copy(alpha = 0.34f * k), 0.08f to look.accent.copy(alpha = 0.24f * k),
+                        0.20f to look.accent.copy(alpha = 0.12f * k), 0.38f to look.accent.copy(alpha = 0.05f * k),
+                        0.60f to look.accent.copy(alpha = 0.015f * k), 1f to Color.Transparent,
+                        center = lp, radius = dia.toPx() * 0.62f),
+                    radius = R - 1f, center = c)
+                val sw = minOf(360f / n * 1.1f, 96f)
+                for ((span, al) in listOf(2f to 0.10f, 1.1f to 0.25f, 0.5f to 0.55f)) {
+                    drawArc(look.accent.copy(alpha = al * k), lit - 90f - sw * span / 2, sw * span, false,
+                        Offset(c.x - R + 1f, c.y - R + 1f), Size(2 * R - 2f, 2 * R - 2f),
+                        style = Stroke(1.5.dp.toPx(), cap = StrokeCap.Butt))
                 }
             }
-            items.forEachIndexed { i, t ->
-                val a by animateFloatAsState(i * 360f / n, spring(0.75f, Spring.StiffnessLow), label = "a_${t.id}")
-                val rad = Math.toRadians(a.toDouble())
-                val lit = t.id == start
-                Box(Modifier.offset { IntOffset((orbit.toPx() * sin(rad)).roundToInt(), (-orbit.toPx() * cos(rad)).roundToInt()) }
-                    .size(40.dp).background(if (lit) accent.copy(alpha = 0.18f) else Color.Transparent, CircleShape),
-                    contentAlignment = Alignment.Center) {
-                    Icon(painterResource(orbitIcon(t.icon)), t.label, Modifier.size(20.dp),
-                        tint = if (lit) Color.White else Color.White.copy(alpha = 0.62f))
-                }
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(items.firstOrNull { it.id == start }?.label ?: "—", color = Color.White,
-                    style = MaterialTheme.typography.titleMedium)
-                Text("${items.size} item${if (items.size == 1) "" else "s"}", color = Color.White.copy(alpha = 0.55f),
-                    style = MaterialTheme.typography.labelMedium)
-            }
+            drawCircle(look.fg(0.06f), R - 12.dp.toPx(), c, style = Stroke(1.dp.toPx()))
+        }
+        items.forEachIndexed { i, t ->
+            val ang by animateFloatAsState(i * 360f / n, spring(0.75f, Spring.StiffnessLow), label = "a_${t.id}")
+            val rad = Math.toRadians(ang.toDouble())
+            val on = t.id == start
+            Icon(painterResource(orbitIcon(t.icon)), t.label,
+                Modifier.offset { IntOffset((orbit.toPx() * sin(rad)).roundToInt(), (-orbit.toPx() * cos(rad)).roundToInt()) }.size(20.dp),
+                tint = if (on) (if (look.dark) Color.White else look.accent) else look.inkDim)
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(items.firstOrNull { it.id == start }?.label ?: "-", color = look.ink, style = MaterialTheme.typography.titleMedium)
+            Text("${items.size} item${if (items.size == 1) "" else "s"}", color = look.inkDim, style = MaterialTheme.typography.labelMedium)
         }
     }
 }

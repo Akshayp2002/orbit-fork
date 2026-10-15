@@ -10,9 +10,17 @@ import QtQuick.Effects
 QtObject {
     id: ui
     readonly property real s: orbit.uiScale
-    readonly property color accent: orbit.accent
-    readonly property color ink: "#F4F6FB"
-    readonly property color inkDim: Qt.rgba(1, 1, 1, 0.52)
+    // One look: the highlighted item is a light source. Appearance: dark or light.
+    readonly property bool dark: orbit.dark
+    readonly property color accent: dark ? orbit.accent : Qt.darker(orbit.accent, 1.32)
+    function accentA(a) { return Qt.rgba(accent.r, accent.g, accent.b, a) }
+    function fg(a) { return dark ? Qt.rgba(1, 1, 1, a) : Qt.rgba(0.05, 0.06, 0.09, a) }
+    readonly property color ink: dark ? "#F4F6FB" : "#12141A"
+    readonly property color inkDim: fg(dark ? 0.50 : 0.48)
+    readonly property color surface: dark ? Qt.rgba(0.04, 0.045, 0.06, 1.0) : Qt.rgba(0.985, 0.986, 0.995, 1.0)
+    readonly property color edge: dark ? Qt.rgba(1, 1, 1, 0.07) : Qt.rgba(0, 0, 0, 0.08)
+    readonly property real light: dark ? 1.0 : 0.8          // how strongly the selected item glows
+    readonly property color shadowC: dark ? "#A0000000" : "#38000000"
     property rect screen: Qt.rect(0, 0, 1920, 1080)      // screen under the cursor
 
     property Connections bridge: Connections {
@@ -127,41 +135,109 @@ QtObject {
             function px(angleDeg, r) { return dia / 2 + r * Math.sin(angleDeg * Math.PI / 180) }
             function py(angleDeg, r) { return dia / 2 - r * Math.cos(angleDeg * Math.PI / 180) }
 
-            // ---- glass disc with soft shadow (shadow is a separate item: if the
-            // graphics backend can't run it, only the shadow is lost, never the disc)
+            // ---- disc with soft shadow (the shadow is its own item: if a graphics
+            // backend can't run it, only the shadow is lost, never the disc)
             RectangularShadow {
                 anchors.fill: disc
                 offset.y: 10 * ui.s
                 radius: disc.radius
                 blur: 36 * ui.s
                 spread: 0
-                color: "#A0000000"
+                color: ui.shadowC
             }
             Rectangle {
                 id: disc
                 anchors.fill: parent
                 radius: width / 2
-                color: Qt.rgba(0.075, 0.08, 0.10, 1.0)
-                border.color: Qt.rgba(1, 1, 1, 0.08)
+                color: ui.surface
+                border.color: ui.edge
                 border.width: 1
             }
-            // inner highlight for depth
-            Rectangle {
-                anchors.centerIn: parent
-                width: wheel.dia - 2; height: width; radius: width / 2
-                color: "transparent"
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.045) }
-                    GradientStop { position: 0.5; color: "transparent" }
-                }
-            }
 
-            // ---- track + tick marks
+            // ---- the highlighted item is a light source. Its light falls across the
+            // disc with a natural (soft, quickly fading) falloff, catches the rim nearest
+            // to it and spills a little past the edge. Everything rides the selection
+            // spring, so the light glides from item to item.
+            Item {
+                id: puck                     // keeps the commit pulse: the light flares
+                property real pulse: 1
+                readonly property real lx: wheel.px(wheel.selAngle, wheel.rad)
+                readonly property real ly: wheel.py(wheel.selAngle, wheel.rad)
+                readonly property real k: ui.light * (0.75 + 0.25 * pulse)
+            }
+            // light on the disc (the fill is the disc itself, so it never leaves it)
             Shape {
                 anchors.fill: parent
                 preferredRendererType: Shape.CurveRenderer
                 ShapePath {
-                    strokeColor: Qt.rgba(1, 1, 1, 0.07); strokeWidth: 1; fillColor: "transparent"
+                    strokeColor: "transparent"
+                    fillGradient: RadialGradient {
+                        centerX: puck.lx; centerY: puck.ly; focalX: centerX; focalY: centerY
+                        centerRadius: wheel.dia * 0.62; focalRadius: 0
+                        GradientStop { position: 0.00; color: ui.accentA(0.34 * puck.k) }
+                        GradientStop { position: 0.08; color: ui.accentA(0.24 * puck.k) }
+                        GradientStop { position: 0.20; color: ui.accentA(0.12 * puck.k) }
+                        GradientStop { position: 0.38; color: ui.accentA(0.05 * puck.k) }
+                        GradientStop { position: 0.60; color: ui.accentA(0.015 * puck.k) }
+                        GradientStop { position: 1.00; color: "transparent" }
+                    }
+                    PathAngleArc { centerX: wheel.dia / 2; centerY: wheel.dia / 2; radiusX: wheel.dia / 2 - 1; radiusY: radiusX; startAngle: 0; sweepAngle: 360 }
+                }
+            }
+            // light spilling past the rim: a band just outside the disc, lit from the item
+            Shape {
+                id: spill
+                anchors.fill: parent
+                anchors.margins: -46 * ui.s
+                preferredRendererType: Shape.CurveRenderer
+                readonly property real o: 46 * ui.s          // offset of this shape's origin
+                ShapePath {
+                    strokeColor: "transparent"
+                    fillRule: ShapePath.OddEvenFill
+                    fillGradient: RadialGradient {
+                        centerX: puck.lx + spill.o; centerY: puck.ly + spill.o; focalX: centerX; focalY: centerY
+                        centerRadius: wheel.dia * 0.42; focalRadius: 0
+                        GradientStop { position: 0.00; color: ui.accentA(0.30 * puck.k) }
+                        GradientStop { position: 0.18; color: ui.accentA(0.20 * puck.k) }
+                        GradientStop { position: 0.40; color: ui.accentA(0.07 * puck.k) }
+                        GradientStop { position: 0.70; color: ui.accentA(0.015 * puck.k) }
+                        GradientStop { position: 1.00; color: "transparent" }
+                    }
+                    PathAngleArc { centerX: wheel.dia / 2 + spill.o; centerY: centerX; radiusX: wheel.dia / 2 + spill.o - 2; radiusY: radiusX; startAngle: 0; sweepAngle: 360 }
+                    PathMove { x: spill.o + wheel.dia; y: wheel.dia / 2 + spill.o }
+                    PathAngleArc { centerX: wheel.dia / 2 + spill.o; centerY: centerX; radiusX: wheel.dia / 2; radiusY: radiusX; startAngle: 0; sweepAngle: 360 }
+                }
+            }
+            // the rim catching the light: brightest nearest the item, fading both ways
+            Shape {
+                id: rimLight
+                anchors.fill: parent
+                preferredRendererType: Shape.CurveRenderer
+                readonly property real rr: wheel.dia / 2 - 0.75 * ui.s
+                readonly property real sweep: Math.min(wheel.step * 1.1, 96)
+                ShapePath {
+                    strokeColor: ui.accentA(0.10 * puck.k); strokeWidth: 1.5 * ui.s; fillColor: "transparent"; capStyle: ShapePath.FlatCap
+                    PathAngleArc { centerX: wheel.dia / 2; centerY: wheel.dia / 2; radiusX: rimLight.rr; radiusY: radiusX
+                                   startAngle: wheel.selAngle - 90 - rimLight.sweep; sweepAngle: rimLight.sweep * 2 }
+                }
+                ShapePath {
+                    strokeColor: ui.accentA(0.25 * puck.k); strokeWidth: 1.5 * ui.s; fillColor: "transparent"; capStyle: ShapePath.FlatCap
+                    PathAngleArc { centerX: wheel.dia / 2; centerY: wheel.dia / 2; radiusX: rimLight.rr; radiusY: radiusX
+                                   startAngle: wheel.selAngle - 90 - rimLight.sweep * 0.55; sweepAngle: rimLight.sweep * 1.1 }
+                }
+                ShapePath {
+                    strokeColor: ui.accentA(0.55 * puck.k); strokeWidth: 1.5 * ui.s; fillColor: "transparent"; capStyle: ShapePath.RoundCap
+                    PathAngleArc { centerX: wheel.dia / 2; centerY: wheel.dia / 2; radiusX: rimLight.rr; radiusY: radiusX
+                                   startAngle: wheel.selAngle - 90 - rimLight.sweep * 0.25; sweepAngle: rimLight.sweep * 0.5 }
+                }
+            }
+
+            // ---- faint track + tick marks
+            Shape {
+                anchors.fill: parent
+                preferredRendererType: Shape.CurveRenderer
+                ShapePath {
+                    strokeColor: ui.fg(0.06); strokeWidth: 1; fillColor: "transparent"
                     PathAngleArc { centerX: wheel.dia / 2; centerY: wheel.dia / 2; radiusX: wheel.dia / 2 - 14 * ui.s; radiusY: radiusX; startAngle: 0; sweepAngle: 360 }
                 }
             }
@@ -170,44 +246,11 @@ QtObject {
                 Rectangle {
                     readonly property real a: index * wheel.step
                     width: 2 * ui.s; height: 6 * ui.s; radius: 1
-                    color: Qt.rgba(1, 1, 1, index === wheel.index ? 0 : 0.18)
+                    color: ui.fg(index === wheel.index ? 0 : 0.16)
                     x: wheel.px(a, wheel.dia / 2 - 14 * ui.s) - width / 2
                     y: wheel.py(a, wheel.dia / 2 - 14 * ui.s) - height / 2
                     rotation: a
                 }
-            }
-
-            // ---- selection arc on the rim (glow + core), rides the spring
-            Shape {
-                id: selArc
-                anchors.fill: parent
-                preferredRendererType: Shape.CurveRenderer
-                readonly property real sweep: Math.min(wheel.step * 0.62, 70)
-                ShapePath {
-                    strokeColor: Qt.rgba(ui.accent.r, ui.accent.g, ui.accent.b, 0.22)
-                    strokeWidth: 12 * ui.s; fillColor: "transparent"; capStyle: ShapePath.RoundCap
-                    PathAngleArc { centerX: wheel.dia / 2; centerY: wheel.dia / 2; radiusX: wheel.dia / 2 - 14 * ui.s; radiusY: radiusX
-                                   startAngle: wheel.selAngle - 90 - selArc.sweep / 2; sweepAngle: selArc.sweep }
-                }
-                ShapePath {
-                    strokeColor: ui.accent
-                    strokeWidth: 3.5 * ui.s; fillColor: "transparent"; capStyle: ShapePath.RoundCap
-                    PathAngleArc { centerX: wheel.dia / 2; centerY: wheel.dia / 2; radiusX: wheel.dia / 2 - 14 * ui.s; radiusY: radiusX
-                                   startAngle: wheel.selAngle - 90 - selArc.sweep / 2; sweepAngle: selArc.sweep }
-                }
-            }
-
-            // ---- puck behind the highlighted icon
-            Rectangle {
-                id: puck
-                property real pulse: 1
-                width: 56 * ui.s; height: width; radius: width / 2
-                x: wheel.px(wheel.selAngle, wheel.rad) - width / 2
-                y: wheel.py(wheel.selAngle, wheel.rad) - height / 2
-                scale: pulse
-                color: Qt.rgba(ui.accent.r, ui.accent.g, ui.accent.b, 0.20)
-                border.color: Qt.rgba(ui.accent.r, ui.accent.g, ui.accent.b, 0.55)
-                border.width: 1
             }
 
             // ---- items
@@ -233,7 +276,7 @@ QtObject {
                         name: modelData.icon
                         glyph: modelData.glyph
                         size: 22 * ui.s
-                        color: it.sel ? ui.ink : ui.inkDim
+                        color: it.sel ? (ui.dark ? "#FFFFFF" : ui.accent) : ui.inkDim
                         Behavior on color { ColorAnimation { duration: 140 } }
                     }
                     Rectangle {   // one-shot marker
@@ -291,7 +334,7 @@ QtObject {
                         text: centre.cur.sticky ? "press to use" : "press to run"
                         font.pixelSize: 11 * ui.s
                         font.letterSpacing: 0.4
-                        color: Qt.rgba(1, 1, 1, 0.38)
+                        color: ui.fg(0.40)
                     }
                 }
             }
@@ -366,15 +409,16 @@ QtObject {
                 offset.y: 6 * ui.s
                 radius: pill.radius
                 blur: 24 * ui.s
-                color: "#90000000"
+                color: ui.shadowC
             }
             Rectangle {
                 id: pill
                 width: row.implicitWidth + 30 * ui.s
                 height: 58 * ui.s
                 radius: height / 2
-                color: Qt.rgba(0.075, 0.08, 0.10, 1.0)
-                border.color: Qt.rgba(1, 1, 1, 0.08)
+                color: ui.surface
+                border.color: ui.edge
+
                 Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
                 Row {
@@ -385,7 +429,7 @@ QtObject {
                     Rectangle {
                         width: 36 * ui.s; height: width; radius: width / 2
                         anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.rgba(ui.accent.r, ui.accent.g, ui.accent.b, 0.18)
+                        color: ui.accentA(ui.dark ? 0.24 : 0.14)
                         Icon {
                             anchors.centerIn: parent
                             name: hud.icon
@@ -406,7 +450,7 @@ QtObject {
                         Rectangle {
                             visible: hud.progress >= 0
                             width: 150 * ui.s; height: 4 * ui.s; radius: height / 2
-                            color: Qt.rgba(1, 1, 1, 0.10)
+                            color: ui.fg(0.10)
                             Rectangle {
                                 height: parent.height; radius: parent.radius
                                 color: ui.accent

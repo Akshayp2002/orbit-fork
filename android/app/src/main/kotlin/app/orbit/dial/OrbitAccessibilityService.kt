@@ -58,8 +58,11 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
         Orbit.log("settings applied: wheel ${engine.wheel.map { it.id }}, start ${engine.tool.id}")
     }
 
-    private fun buildEngine(): Engine =
-        SettingsStore.load(this).buildEngine(this, overlay, Orbit.rotation, defaultTools())
+    private fun buildEngine(): Engine {
+        val s = SettingsStore.load(this)
+        overlay.state.appearance = s.appearance
+        return s.buildEngine(this, overlay, Orbit.rotation, defaultTools())
+    }
 
     private val ticker = object : Runnable {
         override fun run() { engine.tick(); main.postDelayed(this, 50) }

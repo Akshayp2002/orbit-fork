@@ -14,10 +14,13 @@ data class OrbitSettings(
     val enabled: Set<String>,
     val defaultTool: String,
     val gestures: Map<Kind, String>,
+    /** system | dark | light */
+    val appearance: String = "system",
 ) {
     companion object {
         val GESTURES = listOf(Kind.CLICK, Kind.DOUBLE, Kind.TRIPLE, Kind.HOLD)
         const val OPEN_WHEEL = "open_wheel"
+        val APPEARANCES = listOf("system", "dark", "light")
 
         fun defaults(tools: List<Tool>) = OrbitSettings(
             order = tools.map { it.id },
@@ -60,6 +63,7 @@ data class OrbitSettings(
             order = order.filter { it in ids } + newIds,
             enabled = enabled.filter { it in ids }.toSet() + newIds,
             defaultTool = defaultTool.takeIf { it in ids } ?: ids.first(),
+            appearance = appearance.takeIf { it in APPEARANCES } ?: "system",
         )
     }
 

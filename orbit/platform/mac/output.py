@@ -57,15 +57,11 @@ class MacOutput(Output):
 
     # ---------------- scroll (pixel, continuous: smooth in every app)
     def scroll(self, notches, horizontal=False):
-        from Quartz import (CGEventCreateScrollWheelEvent, CGEventPost, CGEventSetIntegerValueField,
-                            kCGHIDEventTap, kCGScrollEventUnitPixel, kCGScrollWheelEventIsContinuous)
+        from Quartz import CGEventPost, kCGHIDEventTap
         px = int(round(-notches * PX_PER_NOTCH))          # ours: + = down; CG: + = up
         if px == 0:
             return
-        e = (CGEventCreateScrollWheelEvent(None, kCGScrollEventUnitPixel, 2, 0, px) if horizontal
-             else CGEventCreateScrollWheelEvent(None, kCGScrollEventUnitPixel, 1, px))
-        CGEventSetIntegerValueField(e, kCGScrollWheelEventIsContinuous, 1)
-        CGEventPost(kCGHIDEventTap, e)
+        CGEventPost(kCGHIDEventTap, scroll_event(px, horizontal))
 
     # ---------------- media: to the real player (we own "now playing", so media keys loop back)
     def media(self, command):
@@ -141,3 +137,30 @@ class MacOutput(Output):
 
     def center_window(self, title):
         log.info("center:%s — not supported on macOS", title)
+
+
+def scroll_event(px: int, horizontal: bool = False):
+    """A continuous (trackpad-style) pixel scroll at the cursor.
+
+    Built field by field from a plain event instead of CGEventCreateScrollWheelEvent:
+    that one is variadic, which is unreliable through the Python bridge on Apple
+    Silicon, and it doesn't put the event at the cursor, so the scroll could land
+    on the menu bar instead of the window under the pointer.
+    """
+    import Quartz as Q
+    e = Q.CGEventCreate(None)                              # carries the current cursor location
+    loc = Q.CGEventGetLocation(e)
+    Q.CGEventSetType(e, Q.kCGEventScrollWheel)
+    Q.CGEventSetLocation(e, loc)
+    lines = max(1, round(abs(px) / 10)) * (1 if px > 0 else -1)
+    if horizontal:
+        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventPointDeltaAxis2, px)
+        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventDeltaAxis2, lines)
+        Q.CGEventSetDoubleValueField(e, Q.kCGScrollWheelEventFixedPtDeltaAxis2, float(px))
+    else:
+        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventPointDeltaAxis1, px)
+        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventDeltaAxis1, lines)
+        Q.CGEventSetDoubleValueField(e, Q.kCGScrollWheelEventFixedPtDeltaAxis1, float(px))
+    Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventIsContinuous, 1)
+    return e
+

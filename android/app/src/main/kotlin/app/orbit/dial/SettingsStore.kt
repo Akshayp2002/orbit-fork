@@ -11,8 +11,9 @@ object SettingsStore {
     private const val ORDER = "wheel_order"
     private const val ENABLED = "wheel_enabled"
     private const val START = "default_tool"
+    private const val APPEARANCE = "appearance"
     private fun gKey(k: Kind) = "gesture_${k.name.lowercase()}"
-    val KEYS = setOf(ORDER, ENABLED, START) + OrbitSettings.GESTURES.map(::gKey)
+    val KEYS = setOf(ORDER, ENABLED, START, APPEARANCE) + OrbitSettings.GESTURES.map(::gKey)
 
     fun load(ctx: Context): OrbitSettings {
         val all = defaultTools()
@@ -24,6 +25,7 @@ object SettingsStore {
             enabled = list(ENABLED)?.toSet() ?: d.enabled,
             defaultTool = p.getString(START, null) ?: d.defaultTool,
             gestures = OrbitSettings.GESTURES.associateWith { p.getString(gKey(it), null) ?: d.gestures.getValue(it) },
+            appearance = p.getString(APPEARANCE, null) ?: d.appearance,
         ).normalized(all)
     }
 
@@ -32,6 +34,7 @@ object SettingsStore {
             putString(ORDER, s.order.joinToString(","))
             putString(ENABLED, s.order.filter { it in s.enabled }.joinToString(","))
             putString(START, s.defaultTool)
+            putString(APPEARANCE, s.appearance)
             s.gestures.forEach { (k, v) -> putString(gKey(k), v) }
         }.apply()
     }

@@ -171,6 +171,7 @@ def main(argv=None):
         if old.state.value == "wheel":
             ui.wheel_cancel()
         old.shutdown()
+        ui.bridge.set_appearance(cfg2["ui"]["appearance"])
         live["engine"] = Engine(cfg2, out, ui, sources)
         log.info("settings applied — wheel: %s, start: %s, wheel opens with: %s",
                  live["engine"].wheel_ids, live["engine"].tool.id, sorted(live["engine"].open_with))
