@@ -82,9 +82,10 @@ def test_speed_builds_gradually_and_ignores_one_quick_click():
         tool.rotate(_E(), 1)
         gains.append(1 + (tool.max_gain - 1) * tool.speed ** 2)
     tool.leave(_E())
+    span = tool.max_gain - 1            # limits scale with the configured top speed
     steps = [abs(b - a) for a, b in zip(gains, gains[1:])]
-    assert max(steps) < 0.45, gains     # no jump between neighbouring clicks
-    assert max(gains) < 2.2, gains      # normal turning never flies
+    assert max(steps) < 0.23 * span, gains          # no jump between neighbouring clicks
+    assert max(gains) < 1 + 0.6 * span, gains       # normal turning never reaches top speed
 
 
 def test_reverse_brakes_momentum():
