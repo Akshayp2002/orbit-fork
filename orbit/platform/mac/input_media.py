@@ -28,9 +28,7 @@ class MacMediaButtonSource(InputSource):
 
     def __init__(self):
         self._emit: Emit | None = None
-        self._engine = None
-        self._node = None
-        self._buffer = None
+        self._engine = None          # the looping silent AVAudioPlayer
         self._handlers = []          # keep blocks alive
         self._last_assert = 0.0
 
@@ -61,32 +59,38 @@ class MacMediaButtonSource(InputSource):
         return h
 
     def _start_silence(self):
-        from AVFoundation import AVAudioEngine, AVAudioPCMBuffer, AVAudioPlayerNode
+        """Loop a silent WAV with AVAudioPlayer. (AVAudioEngine's mixer graph crashed natively
+        when the output device was unusual - seen on a CI Mac - so keep this minimal.)"""
+        import tempfile
+        import wave
+        from pathlib import Path
 
-        eng = AVAudioEngine.alloc().init()
-        node = AVAudioPlayerNode.alloc().init()
-        eng.attachNode_(node)
-        fmt = eng.mainMixerNode().outputFormatForBus_(0)
-        eng.connect_to_format_(node, eng.mainMixerNode(), fmt)
-        frames = int(fmt.sampleRate() / 10) or 4800
-        buf = AVAudioPCMBuffer.alloc().initWithPCMFormat_frameCapacity_(fmt, frames)
-        buf.setFrameLength_(frames)                  # zero-filled = silence
-        ok, err = eng.startAndReturnError_(None)
-        if not ok:
-            log.warning("silent audio engine failed to start: %s", err)
+        from AVFoundation import AVAudioPlayer
+        from Foundation import NSURL
+
+        path = Path(tempfile.gettempdir()) / "orbit-silence.wav"
+        if not path.exists():
+            with wave.open(str(path), "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(22050)
+                w.writeframes(b"\x00\x00" * 22050)
+        player, err = AVAudioPlayer.alloc().initWithContentsOfURL_error_(NSURL.fileURLWithPath_(str(path)), None)
+        if player is None:
+            log.warning("silent player failed: %s (presses may go to other apps)", err)
             return
-        node.scheduleBuffer_atTime_options_completionHandler_(buf, None, 1, None)  # 1 = Loops
-        node.play()
-        self._engine, self._node, self._buffer = eng, node, buf
+        player.setNumberOfLoops_(-1)
+        if not player.play():
+            log.warning("silent player did not start (no audio output?)")
+        self._engine = player
 
     def reassert(self):
         """Become the now-playing app again (another player may have taken over)."""
         from MediaPlayer import MPNowPlayingInfoCenter, MPNowPlayingPlaybackStatePlaying
 
         MPNowPlayingInfoCenter.defaultCenter().setPlaybackState_(MPNowPlayingPlaybackStatePlaying)
-        if self._engine is not None and not self._engine.isRunning():
-            self._engine.startAndReturnError_(None)
-            self._node.play()
+        if self._engine is not None:
+            self._engine.stop()
+            self._engine.setCurrentTime_(0)
+            self._engine.play()                       # a fresh start makes us the latest player
         self._last_assert = time.monotonic()
 
     def observe(self, ev):

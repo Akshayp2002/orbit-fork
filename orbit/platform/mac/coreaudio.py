@@ -125,7 +125,7 @@ def set_volume(dev: int, level: float):
 # Every registered ctypes callback lives here until it is removed: if one were
 # garbage-collected while CoreAudio still holds its pointer, the next notification
 # would jump into freed memory and crash the process.
-_alive: set = set()
+_alive: dict[int, object] = {}
 
 
 def _proc(cb):
@@ -145,7 +145,7 @@ def add_volume_listener(dev: int, cb) -> object:
     a = Addr(VMVC, OUTPUT, MAIN)
     _check(_AT.AudioHardwareServiceAddPropertyListener(dev, byref(a), proc, None), "add volume listener")
     handle = (dev, proc)
-    _alive.add(handle)
+    _alive[id(proc)] = handle
     return handle
 
 
@@ -153,7 +153,7 @@ def remove_volume_listener(handle):
     dev, proc = handle
     a = Addr(VMVC, OUTPUT, MAIN)
     _AT.AudioHardwareServiceRemovePropertyListener(dev, byref(a), proc, None)
-    _alive.discard(handle)
+    _alive.pop(id(proc), None)
 
 
 def add_devices_listener(cb) -> object:
@@ -161,11 +161,11 @@ def add_devices_listener(cb) -> object:
     proc = _proc(cb)
     a = Addr(DEVICES, GLOBAL, MAIN)
     _check(_CA.AudioObjectAddPropertyListener(SYSTEM, byref(a), proc, None), "add devices listener")
-    _alive.add(proc)
+    _alive[id(proc)] = proc
     return proc
 
 
 def remove_devices_listener(proc):
     a = Addr(DEVICES, GLOBAL, MAIN)
     _CA.AudioObjectRemovePropertyListener(SYSTEM, byref(a), proc, None)
-    _alive.discard(proc)
+    _alive.pop(id(proc), None)
