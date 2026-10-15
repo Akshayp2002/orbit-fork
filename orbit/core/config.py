@@ -47,10 +47,25 @@ def find(explicit: str | None) -> Path:
     raise FileNotFoundError("no config.toml found (looked in --config, user dir, project dir)")
 
 
-def load(explicit: str | None = None) -> tuple[dict, Path]:
+PLATFORM_KEYS = {"win32": "windows", "darwin": "mac", "linux": "linux"}
+
+
+def current_platform() -> str:
+    return PLATFORM_KEYS.get(sys.platform, sys.platform)
+
+
+def apply_platform(cfg: dict, platform: str | None = None) -> dict:
+    """Merge [platforms.<name>] over the shared config, e.g. Cmd instead of Ctrl on mac.
+    A tool or gesture set there replaces individual keys, not the whole table."""
+    platform = platform or current_platform()
+    overrides = cfg.pop("platforms", {})
+    return _merge(cfg, overrides.get(platform, {}))
+
+
+def load(explicit: str | None = None, platform: str | None = None) -> tuple[dict, Path]:
     path = find(explicit)
     with path.open("rb") as f:
-        cfg = _merge(DEFAULTS, tomllib.load(f))
+        cfg = apply_platform(_merge(DEFAULTS, tomllib.load(f)), platform)
     validate(cfg)
     return cfg, path
 

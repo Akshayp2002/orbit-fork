@@ -251,17 +251,18 @@ class BrightnessTool(Tool):
 
 
 class WindowSwitcherTool(Tool):
-    """Rotate = walk the native Alt+Tab list; press or pause = land on that window."""
+    """Rotate = walk the native Alt+Tab (mac: Cmd+Tab) list; press or pause = land there."""
 
     def __init__(self, tid, cfg):
         super().__init__(tid, cfg)
         self.commit_after = cfg.get("commit_after_ms", 900) / 1000
+        self.modifier = cfg.get("modifier", "alt")
         self._open = False
         self._last = 0.0
 
     def rotate(self, e, delta):
         if not self._open:
-            e.out.key_down("alt")
+            e.out.key_down(self.modifier)
             self._open = True
         for _ in range(abs(delta)):
             e.out.keys("tab" if delta > 0 else "shift+tab")
@@ -270,7 +271,7 @@ class WindowSwitcherTool(Tool):
 
     def _commit(self, e):
         if self._open:
-            e.out.key_up("alt")
+            e.out.key_up(self.modifier)
             self._open = False
 
     def gesture(self, e, name):

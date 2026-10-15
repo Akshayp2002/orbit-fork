@@ -1,23 +1,19 @@
-"""macOS backend — not implemented yet. Plan, so the shape is clear:
+"""macOS backend (see docs/research-macos.md for the why behind each choice).
 
 Sources
-  rotation : CoreAudio kAudioDevicePropertyVolumeScalar listener on the buds
-             output device (AVRCP absolute volume lands there, same 1/16 steps).
-             Consume mode restores the level, like Windows.
-  clicks   : MPRemoteCommandCenter (play/pause/next/previous) while we publish
-             a MPNowPlayingInfoCenter entry and play silence through AVAudioEngine.
-  hold     : macOS answers HFP AT+BVRA itself and opens Siri. Options: watch for
-             the Siri process / unified log (`log stream --predicate ...`), or a
-             PacketLogger-style HCI capture. To be researched.
+  MacVolumeRotationSource  rotation  (CoreAudio VirtualMainVolume of the buds' output)
+  MacMediaButtonSource     clicks    (MPRemoteCommandCenter while Orbit is "now playing")
+  hold                     not observable on macOS: the wheel opens with double press
 
 Output
-  keys     : CGEventCreateKeyboardEvent / CGEventPost (needs Accessibility permission)
-  scroll   : CGEventCreateScrollWheelEvent
-  media    : MRMediaRemoteSendCommand (private) or AppleScript to Music/Spotify
-  launch   : `open`
+  MacOutput  Quartz CGEvent keys/scroll (needs Accessibility), AppleScript media
+             forwarding to Spotify/Music, DisplayServices / m1ddc brightness, `open`.
 
-The UI layer (Qt Quick) and the engine are already cross-platform.
+Not available on macOS: hiding the system volume HUD, Windows-style window centering,
+pressing buttons inside other apps.
 """
+from __future__ import annotations
+
 from orbit.platform.base import Platform
 
 
@@ -25,7 +21,22 @@ class MacPlatform(Platform):
     name = "mac"
 
     def create_sources(self, cfg):
-        raise NotImplementedError("macOS backend not built yet — see orbit/platform/mac/__init__.py")
+        from orbit.platform.mac.input_media import MacMediaButtonSource
+        from orbit.platform.mac.input_volume import MacVolumeRotationSource
+        from orbit.platform.mac.overlay import make_agent_app
+
+        make_agent_app()
+        return [MacVolumeRotationSource(cfg["device"]["audio_endpoint_match"]), MacMediaButtonSource()]
 
     def create_output(self, cfg):
-        raise NotImplementedError("macOS backend not built yet")
+        from orbit.platform.mac.output import MacOutput
+        from orbit.platform.mac.overlay import ensure_accessibility
+
+        ensure_accessibility(prompt=True)
+        return MacOutput()
+
+    def is_elevated(self):
+        return True          # nothing on macOS needs admin
+
+    def relaunch_elevated(self, argv):
+        return False

@@ -1,15 +1,30 @@
 """Qt Quick overlay: implements the engine's UI protocol.
 
-One frameless, transparent, click-through, never-focused window per show,
-placed on the screen under the cursor. QML does all drawing and animation.
+Two small frameless, transparent, click-through, never-focused windows (wheel,
+HUD), placed on the screen under the cursor. QML does all drawing and animation.
+Platform tweaks: Windows gets no-activate/tool-window styles and the software
+renderer, macOS gets HUD-panel behaviour.
 """
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QUrl, Signal, Slot, Property
+# Qt Quick's default threaded render loop advances animations on the swapchain's
+# vsync. For a transparent click-through overlay the OS may never present it, so
+# animations froze at their start values (opacity 0): the wheel never appeared.
+# The basic loop drives animations from a timer. Must be set before Qt starts.
+os.environ.setdefault("QSG_RENDER_LOOP", "basic")
+# On Windows, click-through needs a layered window, and Direct3D/OpenGL presents
+# to layered windows only reliably for the first frame: later frames (every
+# animation) never reached the screen. Qt Quick's software renderer updates layered
+# windows the way Windows expects. The windows are small, so the CPU cost is low.
+if sys.platform == "win32":
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+
+from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
@@ -25,7 +40,8 @@ class Bridge(QObject):
     wheelMoved = Signal(int, int)
     wheelCommitted = Signal(int)
     wheelCancelled = Signal()
-    hudShown = Signal(str, str, str, float, int)   # glyph, title, detail, progress(-1 none), direction
+    # icon name, glyph fallback, title, detail, progress (-1 = none), direction
+    hudShown = Signal(str, str, str, str, float, int)
     placed = Signal(int, int, int, int)
 
     def __init__(self, cfg: dict):
@@ -44,9 +60,9 @@ class Bridge(QObject):
     def hudMs(self):
         return int(self._cfg["ui"]["hud_ms"])
 
-    @Property(str, constant=True)
-    def iconFont(self):
-        return assets.ICON_FONT
+    @Slot(str, str, result=str)
+    def tint(self, icon, color):
+        return assets.tinted_url(icon, color)
 
 
 class QtUI:
@@ -59,13 +75,24 @@ class QtUI:
         self.qml.load(QUrl.fromLocalFile(str(QML)))
         if not self.qml.rootObjects():
             raise RuntimeError("Overlay.qml failed to load")
-        self.window = self.qml.rootObjects()[0]
-        if sys.platform == "win32":
-            self._win_noactivate()
+        by_name = {w.objectName(): w for w in QGuiApplication.topLevelWindows()}
+        self.windows = [by_name["orbitWheel"], by_name["orbitHud"]]
+        self.window = self.windows[0]
+        native = QGuiApplication.platformName() in ("windows", "cocoa")   # not offscreen/minimal
+        for w in self.windows:
+            if not native:
+                continue
+            if sys.platform == "win32":
+                self._win_noactivate(w)
+            elif sys.platform == "darwin":
+                from orbit.platform.mac.overlay import macify
+                w.visibleChanged.connect(lambda v, w=w: v and macify(w))
+                macify(w)
 
-    def _win_noactivate(self):
+    @staticmethod
+    def _win_noactivate(window):
         import ctypes
-        hwnd = int(self.window.winId())
+        hwnd = int(window.winId())
         GWL_EXSTYLE = -20
         u = ctypes.windll.user32
         u.GetWindowLongPtrW.restype = ctypes.c_ssize_t
@@ -95,5 +122,5 @@ class QtUI:
 
     def hud(self, h: Hud):
         self._place()
-        self.bridge.hudShown.emit(assets.glyph(h.icon, h.title), h.title, h.detail,
+        self.bridge.hudShown.emit(h.icon, assets.glyph(h.icon, h.title), h.title, h.detail,
                                   -1.0 if h.progress is None else float(h.progress), h.direction)
