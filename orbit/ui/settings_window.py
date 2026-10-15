@@ -157,7 +157,7 @@ class WheelPreview(QWidget):
         self._from: dict[str, float] = {}
         self._to: dict[str, float] = {}
         self._t = 1.0
-        self._pix: dict[tuple[str, str], QPixmap] = {}
+        self._pix: dict[tuple[str, str], QIcon] = {}
         self._anim = QVariantAnimation(self, startValue=0.0, endValue=1.0, duration=420)
         self._anim.setEasingCurve(QEasingCurve.OutCubic)
         self._anim.valueChanged.connect(self._step)
@@ -189,12 +189,16 @@ class WheelPreview(QWidget):
             out[tid] = a + d * self._t
         return out
 
-    def _glyph(self, icon: str, color: str) -> QPixmap:
+    def _glyph(self, icon: str, color: str) -> QIcon:
         key = (icon, color)
         if key not in self._pix:
-            self._pix[key] = _icon(icon, color).pixmap(QSize(22, 22) * self.devicePixelRatioF())
-            self._pix[key].setDevicePixelRatio(self.devicePixelRatioF())
+            self._pix[key] = _icon(icon, color)
         return self._pix[key]
+
+    def _draw_icon(self, p: QPainter, icon: str, color: str, centre: QPointF, size: int = 20):
+        # QIcon.paint renders at the screen's real pixel density; drawing a pixmap made for
+        # it scaled it twice on Retina (Mac screenshot: icons ~2x, over the centre text)
+        self._glyph(icon, color).paint(p, int(centre.x() - size / 2), int(centre.y() - size / 2), size, size)
 
     def paintEvent(self, _):
         p = QPainter(self)
@@ -248,7 +252,7 @@ class WheelPreview(QWidget):
             pos = QPointF(c.x() + orbit_r * math.sin(ia), c.y() - orbit_r * math.cos(ia))
             lit = tid == self.start
             col = (QColor("#FFFFFF") if dark else acc) if lit else ink2
-            p.drawPixmap(pos - QPointF(11, 11), self._glyph(icon, col.name()))
+            self._draw_icon(p, icon, col.name(), pos)
         p.setPen(ink)
         p.setFont(_font(17, QFont.DemiBold))
         name = next((lbl for t, lbl, _ in self.items if t == self.start), "")

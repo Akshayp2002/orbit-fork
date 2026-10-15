@@ -60,8 +60,23 @@ class Bus(QObject):
         self.event.emit(ev)
 
 
+ICONS = Path(__file__).resolve().parent / "ui" / "icons"
+
+
+def app_icon() -> QIcon:
+    """The Orbit mark (rendered by tools/make_icon.py)."""
+    return QIcon(str(ICONS / "orbit.png"))
+
+
 def tray_icon(accent: str) -> QIcon:
-    pm = QPixmap(64, 64)
+    """macOS: a template the menu bar tints for light / dark. Elsewhere: the app icon."""
+    if sys.platform == "darwin" and (ICONS / "orbit_tray.png").exists():
+        icon = QIcon(str(ICONS / "orbit_tray.png"))
+        icon.setIsMask(True)
+        return icon
+    if (ICONS / "orbit.png").exists():
+        return app_icon()
+    pm = QPixmap(64, 64)                     # fallback: the old drawn ring
     pm.fill(Qt.transparent)
     p = QPainter(pm)
     p.setRenderHint(QPainter.Antialiasing)
@@ -100,6 +115,7 @@ def main(argv=None):
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("Orbit")
+    app.setWindowIcon(app_icon())
 
     lock = QLockFile(str(data_dir() / "orbit.lock"))
     lock.setStaleLockTime(0)

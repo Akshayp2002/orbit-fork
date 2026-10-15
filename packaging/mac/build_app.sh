@@ -15,7 +15,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-python -m PyInstaller --noconfirm --windowed --name Orbit \
+# app icon: .icns from the 1024 px master (tools/make_icon.py)
+ICONSET=build/Orbit.iconset
+rm -rf "$ICONSET" && mkdir -p "$ICONSET"
+for px in 16 32 128 256 512; do
+  sips -z $px $px orbit/ui/icons/orbit.png --out "$ICONSET/icon_${px}x${px}.png" >/dev/null
+  sips -z $((px * 2)) $((px * 2)) orbit/ui/icons/orbit.png --out "$ICONSET/icon_${px}x${px}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o build/Orbit.icns
+
+python -m PyInstaller --noconfirm --windowed --name Orbit --icon build/Orbit.icns \
   --osx-bundle-identifier app.orbit.dial \
   --add-data "orbit/ui/qml:orbit/ui/qml" \
   --add-data "orbit/ui/icons:orbit/ui/icons" \

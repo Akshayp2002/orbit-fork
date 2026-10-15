@@ -1,10 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Orbit mark: an open ring with a highlight arc, like the wheel's selection. -->
+<!-- Orbit mark (same as orbit/ui/icons/orbit.png, tools/make_icon.py): a dark wheel whose
+     selected item is a light source, lighting the disc and catching the rim. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-    <path android:pathData="M54,30a24,24 0 1,1 -0.01,0" android:strokeColor="#33FFFFFF" android:strokeWidth="5"
-        android:fillColor="#00000000" />
-    <path android:pathData="M54,30a24,24 0 0,1 22.8,16.6" android:strokeColor="#7C9CFF" android:strokeWidth="7"
-        android:strokeLineCap="round" android:fillColor="#00000000" />
-    <path android:pathData="M54,47a7,7 0 1,1 -0.01,0" android:fillColor="#7C9CFF" />
+    <path android:pathData="M27,54a27,27 0 1,0 54,0a27,27 0 1,0 -54,0" android:fillColor="#0B0C11"
+        android:strokeColor="#16FFFFFF" android:strokeWidth="0.4" />
+    <path android:pathData="M27.3,54a26.7,26.7 0 1,0 53.4,0a26.7,26.7 0 1,0 -53.4,0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="65.89" android:centerY="39.83" android:gradientRadius="38">
+                <item android:offset="0" android:color="#B37C9CFF" />
+                <item android:offset="0.08" android:color="#807C9CFF" />
+                <item android:offset="0.2" android:color="#427C9CFF" />
+                <item android:offset="0.4" android:color="#177C9CFF" />
+                <item android:offset="0.65" android:color="#057C9CFF" />
+                <item android:offset="1" android:color="#007C9CFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M64.98,29.33A27,27 0 0,1 76.38,38.90" android:strokeColor="#F27C9CFF"
+        android:strokeWidth="0.8" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <path android:pathData="M71.03,52.39a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M66.77,65.89a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M54.21,72.43a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M40.71,68.17a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M34.17,55.61a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M38.43,42.11a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M50.99,35.57a1.4,1.4 0 1,0 2.8,0a1.4,1.4 0 1,0 -2.8,0" android:fillColor="#40FFFFFF" />
+    <path android:pathData="M57.89,39.83a8,8 0 1,0 16,0a8,8 0 1,0 -16,0">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="65.89" android:centerY="39.83" android:gradientRadius="8">
+                <item android:offset="0" android:color="#E6FFFFFF" />
+                <item android:offset="0.25" android:color="#D97C9CFF" />
+                <item android:offset="1" android:color="#007C9CFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:pathData="M63.19,39.83a2.7,2.7 0 1,0 5.4,0a2.7,2.7 0 1,0 -5.4,0" android:fillColor="#FFFFFFFF" />
 </vector>
