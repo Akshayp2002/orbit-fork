@@ -33,7 +33,9 @@ PLIST=dist/Orbit.app/Contents/Info.plist
 /usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string 13.0" "$PLIST"
 /usr/libexec/PlistBuddy -c "Add :NSAppleEventsUsageDescription string 'Orbit forwards play/pause/next from the dial to your music app.'" "$PLIST"
 SIGN_ID="${ORBIT_SIGN_ID:-}"
-if [ -z "$SIGN_ID" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q '"Orbit Dev"'; then
+# no -v: a self-signed root is never "valid" (not trusted) unless marked Always Trust,
+# yet codesign signs with it fine and the designated requirement stays stable
+if [ -z "$SIGN_ID" ] && security find-identity -p codesigning 2>/dev/null | grep -q '"Orbit Dev"'; then
   SIGN_ID="Orbit Dev"
 fi
 if [ -n "$SIGN_ID" ]; then

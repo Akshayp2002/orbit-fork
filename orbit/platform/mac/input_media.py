@@ -7,6 +7,12 @@ AVAudioEngine so it stays the most recent player.
 
     toggle / play / pause -> CLICK,  next -> DOUBLE,  previous -> TRIPLE
 
+When a press starts a real player (Orbit forwards play/pause to Spotify / Music),
+that player becomes now-playing and the buds' presses go to it, not us (Mac test,
+Oct 2026). So after every forwarded press, and whenever the dial turns, Orbit takes
+now-playing back with a real state change (paused -> playing, fresh now-playing
+info, silent audio restarted); re-announcing "playing" alone changes nothing.
+
 Handlers run on the main thread; Qt's event loop on macOS is the Cocoa run loop,
 so blocks dispatched there are serviced.
 """
@@ -83,21 +89,35 @@ class MacMediaButtonSource(InputSource):
         self._engine = player
 
     def reassert(self):
-        """Become the now-playing app again (another player may have taken over)."""
-        from MediaPlayer import MPNowPlayingInfoCenter, MPNowPlayingPlaybackStatePlaying
+        """Become the now-playing app again (another player may have taken over). It
+        takes a state *change*: setting Playing while already Playing is ignored."""
+        from MediaPlayer import (MPMediaItemPropertyArtist, MPMediaItemPropertyTitle,
+                                 MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyElapsedPlaybackTime,
+                                 MPNowPlayingInfoPropertyPlaybackRate, MPNowPlayingPlaybackStatePaused,
+                                 MPNowPlayingPlaybackStatePlaying)
 
-        MPNowPlayingInfoCenter.defaultCenter().setPlaybackState_(MPNowPlayingPlaybackStatePlaying)
+        center = MPNowPlayingInfoCenter.defaultCenter()
+        center.setPlaybackState_(MPNowPlayingPlaybackStatePaused)
+        center.setNowPlayingInfo_({MPMediaItemPropertyTitle: SESSION_TITLE, MPMediaItemPropertyArtist: "dial input",
+                                   MPNowPlayingInfoPropertyElapsedPlaybackTime: 0.0,
+                                   MPNowPlayingInfoPropertyPlaybackRate: 1.0})
         if self._engine is not None:
             self._engine.stop()
             self._engine.setCurrentTime_(0)
             self._engine.play()                       # a fresh start makes us the latest player
+        center.setPlaybackState_(MPNowPlayingPlaybackStatePlaying)
         self._last_assert = time.monotonic()
 
     def observe(self, ev):
+        from PyObjCTools import AppHelper
+        if ev.source == self.name and ev.kind in (Kind.CLICK, Kind.TRIPLE):
+            # we just forwarded play/pause (or previous) to the real player, which then
+            # claims now-playing: take it back once it has settled
+            AppHelper.callAfter(lambda: AppHelper.callLater(0.9, self._safe_reassert))
+            return
         # the wheel is about to need presses: make sure they'll come to us
         if ev.kind in (Kind.ROTATE, Kind.DOUBLE) and time.monotonic() - self._last_assert > 2.0:
             self._last_assert = time.monotonic()
-            from PyObjCTools import AppHelper
             AppHelper.callAfter(self._safe_reassert)     # observe() runs on source threads
 
     def _safe_reassert(self):
