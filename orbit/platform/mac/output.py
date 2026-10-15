@@ -153,14 +153,12 @@ def scroll_event(px: int, horizontal: bool = False):
     Q.CGEventSetType(e, Q.kCGEventScrollWheel)
     Q.CGEventSetLocation(e, loc)
     lines = max(1, round(abs(px) / 10)) * (1 if px > 0 else -1)
-    if horizontal:
-        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventPointDeltaAxis2, px)
-        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventDeltaAxis2, lines)
-        Q.CGEventSetDoubleValueField(e, Q.kCGScrollWheelEventFixedPtDeltaAxis2, float(px))
-    else:
-        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventPointDeltaAxis1, px)
-        Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventDeltaAxis1, lines)
-        Q.CGEventSetDoubleValueField(e, Q.kCGScrollWheelEventFixedPtDeltaAxis1, float(px))
+    # Continuous first, then coarse to fine: setting a coarser delta makes Quartz
+    # recompute the finer ones, so the exact pixel amount goes in last.
     Q.CGEventSetIntegerValueField(e, Q.kCGScrollWheelEventIsContinuous, 1)
+    ax = 2 if horizontal else 1
+    Q.CGEventSetIntegerValueField(e, getattr(Q, f"kCGScrollWheelEventDeltaAxis{ax}"), lines)
+    Q.CGEventSetDoubleValueField(e, getattr(Q, f"kCGScrollWheelEventFixedPtDeltaAxis{ax}"), float(px))
+    Q.CGEventSetIntegerValueField(e, getattr(Q, f"kCGScrollWheelEventPointDeltaAxis{ax}"), px)
     return e
 

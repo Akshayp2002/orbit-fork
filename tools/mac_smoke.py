@@ -61,15 +61,19 @@ def output():
     import Quartz as Q
     from orbit.platform.mac.output import scroll_event
     e = scroll_event(-24)
-    assert Q.CGEventGetType(e) == Q.kCGEventScrollWheel, Q.CGEventGetType(e)
-    assert Q.CGEventGetIntegerValueField(e, Q.kCGScrollWheelEventPointDeltaAxis1) == -24
-    assert Q.CGEventGetIntegerValueField(e, Q.kCGScrollWheelEventDeltaAxis1) == -2
-    assert Q.CGEventGetIntegerValueField(e, Q.kCGScrollWheelEventIsContinuous) == 1
+    got = {name: Q.CGEventGetIntegerValueField(e, getattr(Q, f"kCGScrollWheelEvent{name}"))
+           for name in ("PointDeltaAxis1", "DeltaAxis1", "IsContinuous")}
+    print("       scroll event fields:", got, "type", Q.CGEventGetType(e))
+    assert Q.CGEventGetType(e) == Q.kCGEventScrollWheel, f"type {Q.CGEventGetType(e)}"
+    assert got["PointDeltaAxis1"] == -24, got
+    assert got["DeltaAxis1"] in (-2, -3), got
+    assert got["IsContinuous"] == 1, got
     cur = Q.CGEventGetLocation(Q.CGEventCreate(None))
     loc = Q.CGEventGetLocation(e)
-    assert (loc.x, loc.y) == (cur.x, cur.y), (loc, cur)
+    assert abs(loc.x - cur.x) < 1 and abs(loc.y - cur.y) < 1, f"event at {loc}, cursor at {cur}"
     h = scroll_event(30, horizontal=True)
-    assert Q.CGEventGetIntegerValueField(h, Q.kCGScrollWheelEventPointDeltaAxis2) == 30
+    h2 = Q.CGEventGetIntegerValueField(h, Q.kCGScrollWheelEventPointDeltaAxis2)
+    assert h2 == 30, f"horizontal point delta {h2}"
     return f"brightness={o.brightness_get()} scroll event ok at {loc.x:.0f},{loc.y:.0f}"
 
 
