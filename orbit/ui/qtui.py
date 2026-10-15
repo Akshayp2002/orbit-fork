@@ -41,9 +41,16 @@ class Bridge(QObject):
     def uiScale(self):
         return float(self._cfg["ui"]["scale"])
 
-    @Property(bool, constant=True)
-    def soundOn(self):
+    soundChanged = Signal()
+
+    def _get_sound(self):
         return bool(self._cfg["ui"]["sound"])
+
+    def set_sound(self, on: bool):
+        self._cfg["ui"]["sound"] = bool(on)
+        self.soundChanged.emit()
+
+    soundOn = Property(bool, _get_sound, notify=soundChanged)
 
     @Property(int, constant=True)
     def hudMs(self):

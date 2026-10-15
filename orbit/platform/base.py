@@ -86,6 +86,11 @@ class Platform(ABC):
     @abstractmethod
     def create_output(self, cfg: dict) -> Output: ...
 
+    def create_services(self, cfg: dict) -> list:
+        """Background helpers with start()/stop() and an `enabled` flag (+ optional
+        `toggle_label` for the tray), e.g. hiding the OS volume flyout. Call after create_sources."""
+        return []
+
     def is_elevated(self) -> bool:
         return True
 

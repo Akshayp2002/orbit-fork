@@ -28,7 +28,8 @@ dismiss_after_ms = 5000
 on_timeout = "select"       # "select": keep the highlighted tool; "cancel": keep the old one
 
 [ui]
-sound = true        # soft tick per detent while the wheel is open
+sound = false       # soft tick in your ears per detent while the wheel is open
+hide_os_volume_flyout = true   # hide the Windows volume bar when the dial causes it (keyboard keys still show it)
 hud_ms = 1400       # how long the HUD pill stays after the last interaction
 scale = 1.0
 accent = "#7C9CFF"

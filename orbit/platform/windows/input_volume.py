@@ -85,6 +85,7 @@ class VolumeRotationSource(RotationSource):
         self._need_rebind = True
         self._dev_cb = None
         self._recentered_at = 0.0
+        self._last_dial = 0.0
         self._pending = 0
         self._flush_timer: threading.Timer | None = None
 
@@ -111,6 +112,10 @@ class VolumeRotationSource(RotationSource):
 
     def level(self):
         return self._any_level()
+
+    def last_activity(self) -> float:
+        """monotonic time of the last dial detent or our own recenter (both pop the OS volume flyout)."""
+        return max(self._last_dial, self._recentered_at)
 
     def describe(self):
         names = [d.FriendlyName for d, _ in self._bound.values()]
@@ -144,7 +149,7 @@ class VolumeRotationSource(RotationSource):
             delta = round((vol - prev) * STEPS)
             if delta == 0:
                 return
-            self._last_move = time.monotonic()
+            self._last_move = self._last_dial = time.monotonic()
             if not self._passthrough:
                 s = round(vol * STEPS)
                 if s <= EDGE_STEPS or s >= STEPS - EDGE_STEPS:

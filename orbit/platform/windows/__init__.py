@@ -33,11 +33,16 @@ class WindowsPlatform(Platform):
         from orbit.platform.windows.input_volume import VolumeRotationSource
 
         self._media = MediaButtonSource(cache_dir())
-        return [
-            VolumeRotationSource(cfg["device"]["audio_endpoint_match"]),
-            self._media,
-            BluetoothPacketSource(),
-        ]
+        self._volume = VolumeRotationSource(cfg["device"]["audio_endpoint_match"])
+        return [self._volume, self._media, BluetoothPacketSource()]
+
+    def create_services(self, cfg):
+        from orbit.platform.windows.flyout import FlyoutSuppressor
+
+        f = FlyoutSuppressor(self._volume.last_activity)
+        f.enabled = bool(cfg["ui"]["hide_os_volume_flyout"])
+        f.toggle_label = "Hide Windows volume bar"
+        return [f]
 
     def create_output(self, cfg):
         from orbit.platform.windows.output import WindowsOutput

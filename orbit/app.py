@@ -135,6 +135,13 @@ def main(argv=None):
     engine = Engine(cfg, out, ui, sources)
     bus.event.connect(engine.handle, Qt.QueuedConnection)
 
+    services = plat.create_services(cfg)
+    for svc in services:
+        try:
+            svc.start()
+        except Exception:
+            log.exception("service failed: %s", type(svc).__name__)
+
     ticker = QTimer()
     ticker.setInterval(50)
     ticker.timeout.connect(engine.tick)
@@ -155,23 +162,47 @@ def main(argv=None):
     a_quit.triggered.connect(app.quit)
 
     def restart():
-        app.quit()
+        shutdown()  # release the ETW session + lock before the new instance claims them
         import subprocess
         extra = [] if plat.is_elevated() or "--no-elevate" in argv else ["--no-elevate"]
         subprocess.Popen([sys.executable, "-m", "orbit", *extra, *argv],
                          creationflags=0x08000000 if sys.platform == "win32" else 0)
+        app.quit()
 
     a_restart.triggered.connect(restart)
+
+    # live toggles
+    a_sound = QAction("Tick sounds")
+    a_sound.setCheckable(True)
+    a_sound.setChecked(bool(cfg["ui"]["sound"]))
+    a_sound.toggled.connect(ui.bridge.set_sound)
+    toggles = [a_sound]
+    for svc in services:
+        if getattr(svc, "toggle_label", None):
+            a = QAction(svc.toggle_label)
+            a.setCheckable(True)
+            a.setChecked(svc.enabled)
+            a.toggled.connect(lambda on, s=svc: setattr(s, "enabled", on))
+            toggles.append(a)
+
     for a in (a_wheel, a_cfg, a_log, a_restart):
+        menu.addAction(a)
+    menu.addSeparator()
+    for a in toggles:
         menu.addAction(a)
     menu.addSeparator()
     menu.addAction(a_quit)
     tray.setContextMenu(menu)
     tray.show()
 
+    done = []
+
     def shutdown():
+        if done:
+            return
+        done.append(True)
         engine.shutdown()
-        for s in sources:
+        for s in [*sources, *services]:
             try:
                 s.stop()
             except Exception:

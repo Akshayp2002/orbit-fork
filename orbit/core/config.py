@@ -17,7 +17,7 @@ DEFAULTS: dict = {
         "open_wheel_fallback": "triple",
     },
     "wheel": {"items": [], "dismiss_after_ms": 6000},
-    "ui": {"sound": True, "hud_ms": 1400, "scale": 1.0, "accent": "#7C9CFF"},
+    "ui": {"sound": False, "hud_ms": 1400, "scale": 1.0, "accent": "#7C9CFF", "hide_os_volume_flyout": True},
     "tools": {},
 }
 
