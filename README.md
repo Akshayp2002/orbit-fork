@@ -25,7 +25,7 @@ Log: `%LOCALAPPDATA%\Orbit\orbit.log`.
 | Press | tool's click, else play/pause | **select** |
 | Double press | **open wheel** | close, no change |
 | Triple press | back to the previous tool (Volume: next track) | close, no change |
-| Hold (admin) | Claude Quick Entry dictation (`ctrl+alt+d`, set the same key in Claude's settings) | close, no change |
+| Hold (admin) | Claude Quick Entry dictation (`ctrl+alt+v`, set the same key in Claude's settings) | close, no change |
 | Wait 5 s | — | keeps the highlighted tool (one-shot actions never fire on timeout) |
 
 An on-screen tag shows the active tool and its value whenever you use the dial,

@@ -168,7 +168,7 @@ def test_switcher_releases_alt_when_wheel_opens():
 def test_hold_starts_claude_dictation():
     e, out, *_ = make()
     e.handle(ev(Kind.HOLD))
-    assert e.state == State.TOOL and ("keys", "ctrl+alt+d") in out.log
+    assert e.state == State.TOOL and ("keys", "ctrl+alt+v") in out.log
 
 
 def test_no_hold_source_still_opens_with_double():
