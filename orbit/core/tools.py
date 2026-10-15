@@ -125,7 +125,7 @@ class SmoothScrollTool(Tool):
     def __init__(self, tid, cfg):
         super().__init__(tid, cfg)
         self.base = float(cfg.get("notches_per_detent", 1.0))
-        self.max_gain = float(cfg.get("max_gain", 3))
+        self.max_gain = float(cfg.get("max_gain", 4.5))
         glide = float(cfg.get("glide_ms", 300)) / 1000          # momentum decay time constant
         self.momentum_k = 0.8 if glide > 0 else 0.0
         self.glide = max(glide, 1e-3)

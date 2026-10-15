@@ -70,7 +70,7 @@ type = "smooth_scroll"     # momentum scrolling: slow clicks nudge, fast spins f
 label = "Scroll"
 icon = "scroll"
 notches_per_detent = 1.0   # distance of one careful click (1 notch ~ 3 lines)
-max_gain = 3               # turning faster than the buds report goes up to this many times further
+max_gain = 4.5             # turning faster than the buds report goes up to this many times further (tuned on the Mac)
 glide_ms = 300             # how long momentum carries after you stop (0 = none)
 ease_ms = 90               # how quickly each click's distance is delivered
 

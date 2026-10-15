@@ -52,6 +52,8 @@ python -m orbit
 1. Pair the buds and make them the output device.
 2. Grant **Accessibility** when prompted (System Settings → Privacy & Security →
    Accessibility → enable the app you launched Orbit from), then restart Orbit.
+   Keep `--config` files out of `~/Documents`, `~/Desktop` and `~/Downloads`: macOS
+   holds the read for a privacy prompt and Orbit waits silently before it can log.
    Without it, keys and scrolling are silently dropped.
 3. The first time a press is forwarded to Spotify/Music, allow the Automation prompt.
 
