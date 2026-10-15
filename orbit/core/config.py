@@ -43,21 +43,47 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
-def find(explicit: str | None) -> Path:
-    # A packaged app (PyInstaller) has its default config inside the bundle, which is
-    # replaced on every rebuild: never edit that one. It is copied to the user dir below.
-    frozen = getattr(sys, "frozen", False)
-    for p in (Path(explicit) if explicit else None, user_config_path(), None if frozen else PROJECT_CONFIG):
-        if p and p.exists():
-            return p
-    # packaged app (PyInstaller): ship the default, copy it where the user can edit it
+USER_STUB = """# Orbit: your changes.
+# Orbit reads its built-in config.toml first, then this file on top of it, so put only
+# the keys you want to change here. New defaults from updates still reach you.
+# Most things (wheel items, gestures, appearance, shortcuts) are easier in Settings.
+#
+# Examples:
+# [tools.scroll]
+# max_gain = 5            # scroll further when turning fast
+#
+# [wheel]
+# dismiss_after_ms = 4000
+"""
+
+
+def base_config() -> Path:
+    """The built-in config: next to the code, or inside a packaged app."""
     bundled = Path(getattr(sys, "_MEIPASS", "")) / "config.toml"
+    if getattr(sys, "frozen", False) and bundled.exists():
+        return bundled
+    if PROJECT_CONFIG.exists():
+        return PROJECT_CONFIG
     if bundled.exists():
-        dest = user_config_path()
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(bundled.read_bytes())
-        return dest
-    raise FileNotFoundError("no config.toml found (looked in --config, user dir, project dir)")
+        return bundled
+    raise FileNotFoundError("no built-in config.toml found")
+
+
+def user_overrides(create: bool = False) -> Path | None:
+    """The user's own file, merged over the built-in config. With `create`, a commented
+    stub is written on first use (a full copy would freeze every default at that day)."""
+    p = user_config_path()
+    if not p.exists() and create:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(USER_STUB, encoding="utf-8")
+    return p if p.exists() else None
+
+
+def find(explicit: str | None) -> Path:
+    """The file to open for editing ("Open config"): --config, else the user overrides."""
+    if explicit:
+        return Path(explicit)
+    return user_overrides(create=True) or base_config()
 
 
 PLATFORM_KEYS = {"win32": "windows", "darwin": "mac", "linux": "linux"}
@@ -75,12 +101,26 @@ def apply_platform(cfg: dict, platform: str | None = None) -> dict:
     return _merge(cfg, overrides.get(platform, {}))
 
 
+def _read(path: Path) -> dict:
+    with path.open("rb") as f:
+        return tomllib.load(f)
+
+
 def load(explicit: str | None = None, platform: str | None = None,
          user_settings: dict | None = None) -> tuple[dict, Path]:
-    """`user_settings`: the Settings window's choices (orbit.core.settings), layered last."""
-    path = find(explicit)
-    with path.open("rb") as f:
-        cfg = apply_platform(_merge(DEFAULTS, tomllib.load(f)), platform)
+    """Built-in config.toml, then the user's overrides on top (or a full --config file),
+    then [platforms.<os>], then the Settings window's choices (`user_settings`).
+    Returns the config and the path to open for editing."""
+    if explicit:
+        path = Path(explicit)
+        raw = _merge(DEFAULTS, _read(path))
+    else:
+        raw = _merge(DEFAULTS, _read(base_config()))
+        user = user_overrides(create=getattr(sys, "frozen", False))
+        if user:
+            raw = _merge(raw, _read(user))
+        path = user or base_config()
+    cfg = apply_platform(raw, platform)
     if user_settings:
         from orbit.core import settings
         cfg = settings.apply(cfg, user_settings)

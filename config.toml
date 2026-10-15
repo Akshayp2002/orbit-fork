@@ -1,6 +1,8 @@
 # Orbit config - dial + wheel.
-# Copy to %APPDATA%\Orbit\config.toml (Windows) or ~/Library/Application Support/Orbit/config.toml (mac)
-# to override without touching the repo.
+# These are the built-in defaults. To change something, put just those keys in
+# %APPDATA%\Orbit\config.toml (Windows) or ~/Library/Application Support/Orbit/config.toml
+# (mac); tray > Open config creates it. It is merged over this file, so new defaults
+# still arrive with updates.
 #
 # Action strings:  keys:ctrl+z | scroll:3 | hscroll:-2 | media:play_pause|next|previous
 #                  launch:notepad.exe | launch:https://... | tool:<id> | open_wheel | none

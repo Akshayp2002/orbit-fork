@@ -50,17 +50,21 @@ def test_bad_mac_combo_rejected():
         K.parse("hyper+z")
 
 
-def test_packaged_app_copies_its_default_config_to_the_user_dir(tmp_path, monkeypatch):
-    """The bundle's config is replaced on every rebuild; a packaged app must run from
-    (and let the user edit) a copy in the user config dir."""
+def test_user_file_overrides_only_and_new_defaults_still_arrive(tmp_path, monkeypatch):
+    """The user file holds only their changes, merged over the built-in config, so new
+    defaults from updates reach existing installs. A packaged app writes a commented
+    stub on first run, never a full copy."""
     import sys
     from orbit.core import config as config_mod
-    bundle = tmp_path / "bundle"
-    bundle.mkdir()
-    (bundle / "config.toml").write_text(config_mod.PROJECT_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
     user = tmp_path / "user" / "config.toml"
     monkeypatch.setattr(config_mod, "user_config_path", lambda: user)
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
-    assert config_mod.find(None) == user and user.exists()
-    assert config_mod.find(None) == user           # second run: uses the copy
+    cfg, path = config_mod.load(platform="windows")
+    assert path == user and user.exists() and "[tools.scroll]" not in user.read_text().replace("# [tools.scroll]", "")
+    assert cfg["tools"]["scroll"]["max_gain"] == 4.5                     # built-in default
+    user.write_text("[tools.scroll]\nmax_gain = 6\n[wheel]\ndismiss_after_ms = 3000\n", encoding="utf-8")
+    cfg, _ = config_mod.load(platform="windows")
+    assert cfg["tools"]["scroll"]["max_gain"] == 6                       # user wins
+    assert cfg["tools"]["scroll"]["glide_ms"] == 300                     # other keys still built-in
+    assert cfg["wheel"]["dismiss_after_ms"] == 3000
+    assert "volume" in cfg["wheel"]["items"]                             # untouched lists stay
