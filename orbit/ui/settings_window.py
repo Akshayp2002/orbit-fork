@@ -1,0 +1,605 @@
+"""Settings window (Windows + macOS): which tools are on the wheel and in what
+order, the tool Orbit starts on, and what each press gesture does.
+
+Left: a live preview of the wheel, redrawn as items are switched or reordered.
+Right: grouped lists of native controls. Writes orbit.core.settings
+(settings.json); config.toml is never rewritten.
+"""
+from __future__ import annotations
+
+import math
+from pathlib import Path
+from typing import Callable
+
+from PySide6.QtCore import (QEasingCurve, QPointF, QPropertyAnimation, QRectF, QSize, Qt, QUrl,
+                            QVariantAnimation, Property)
+from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
+                               QScrollArea, QToolButton, QVBoxLayout, QWidget)
+
+from orbit.core import settings as st
+from orbit.core import tools as tools_mod
+from orbit.ui import assets
+
+# Same world as the overlay: near-black blue-tinted glass, one periwinkle accent.
+CANVAS = "#101217"
+PANEL = "#151820"
+GROUP = "#1A1D25"
+HAIR = "#262A34"
+INK = "#F2F4F8"
+INK2 = "#A4AAB8"
+INK3 = "#6E7483"
+WARN = "#F2B46B"
+
+GESTURE_NAMES = {"click": "Press", "double": "Double press", "triple": "Triple press", "hold": "Press and hold"}
+PRESETS = [
+    ("Open the wheel", st.OPEN_WHEEL),
+    ("Play / pause", "media:play_pause"),
+    ("Next track", "media:next"),
+    ("Previous track", "media:previous"),
+    ("Back to previous tool", "last_tool"),
+    ("Nothing", "none"),
+]
+MAX_ITEMS = 12
+
+
+def _summary(act) -> str:
+    text = " → ".join(str(a) for a in act) if isinstance(act, list) else str(act)
+    return text if len(text) <= 34 else text[:33] + "…"
+
+
+def _icon(name: str, color: str) -> QIcon:
+    url = assets.tinted_url(name, color)
+    return QIcon(QUrl(url).toLocalFile()) if url else QIcon()
+
+
+def _font(px: float, weight=QFont.Normal) -> QFont:
+    f = QFontDatabase.systemFont(QFontDatabase.GeneralFont)
+    f.setPixelSize(round(px))
+    f.setWeight(weight)
+    return f
+
+
+# ---------------------------------------------------------------- controls
+class ToggleSwitch(QAbstractButton):
+    """Yes/No switch with a sliding knob (Space toggles it when focused)."""
+
+    def __init__(self, accent: str, checked: bool, parent=None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setChecked(checked)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self._accent = QColor(accent)
+        self._pos = 1.0 if checked else 0.0
+        self._anim = QPropertyAnimation(self, b"knob", self)
+        self._anim.setDuration(180)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.toggled.connect(self._animate)
+
+    def sizeHint(self):
+        return QSize(40, 24)
+
+    def _animate(self, on):
+        self._anim.stop()
+        self._anim.setStartValue(self._pos)
+        self._anim.setEndValue(1.0 if on else 0.0)
+        self._anim.start()
+
+    def _get(self):
+        return self._pos
+
+    def _set(self, v):
+        self._pos = v
+        self.update()
+
+    knob = Property(float, _get, _set)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(2, 2, self.width() - 4, self.height() - 4)
+        off, on = QColor("#343946"), self._accent
+        t = self._pos
+        track = QColor(int(off.red() + (on.red() - off.red()) * t), int(off.green() + (on.green() - off.green()) * t),
+                       int(off.blue() + (on.blue() - off.blue()) * t))
+        if self.hasFocus():
+            p.setPen(QPen(QColor(self._accent.red(), self._accent.green(), self._accent.blue(), 120), 2))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(r.adjusted(-1.5, -1.5, 1.5, 1.5), r.height() / 2 + 1.5, r.height() / 2 + 1.5)
+        p.setPen(Qt.NoPen)
+        p.setBrush(track)
+        p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+        d = r.height() - 6
+        x = r.left() + 3 + (r.width() - d - 6) * t
+        p.setBrush(QColor("#FFFFFF") if t > 0.5 else QColor("#C9CDD6"))
+        p.drawEllipse(QRectF(x, r.top() + 3, d, d))
+
+
+class GesturePips(QWidget):
+    """How the gesture feels on the dial: one, two or three taps, or one long press."""
+
+    def __init__(self, gesture: str, color: str):
+        super().__init__()
+        self.g = gesture
+        self.c = QColor(color)
+        self.setFixedSize(28, 16)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(self.c)
+        cy = self.height() / 2
+        if self.g == "hold":
+            p.drawRoundedRect(QRectF(2, cy - 3, 22, 6), 3, 3)
+            return
+        n = {"click": 1, "double": 2, "triple": 3}[self.g]
+        for i in range(n):
+            p.drawEllipse(QPointF(5 + i * 8, cy), 3, 3)
+
+
+class WheelPreview(QWidget):
+    """The wheel as the overlay draws it: enabled items around the ring, the start
+    tool lit. Items glide to their new places when the list changes."""
+
+    def __init__(self, accent: str):
+        super().__init__()
+        self.accent = QColor(accent)
+        self.items: list[tuple[str, str, str]] = []      # (id, label, icon)
+        self.start = ""
+        self._from: dict[str, float] = {}
+        self._to: dict[str, float] = {}
+        self._t = 1.0
+        self._pix: dict[tuple[str, str], QPixmap] = {}
+        self._anim = QVariantAnimation(self, startValue=0.0, endValue=1.0, duration=420)
+        self._anim.setEasingCurve(QEasingCurve.OutCubic)
+        self._anim.valueChanged.connect(self._step)
+        self.setMinimumSize(260, 260)
+
+    def _step(self, v):
+        self._t = v
+        self.update()
+
+    def set_items(self, items, start: str):
+        n = max(len(items), 1)
+        cur = self._angles()
+        self._from = {i[0]: cur.get(i[0], k * 360 / n) for k, i in enumerate(items)}
+        self._to = {i[0]: k * 360 / n for k, i in enumerate(items)}
+        self.items, self.start = list(items), start
+        self._t = 0.0
+        self._anim.stop()
+        self._anim.start()
+
+    def _angles(self) -> dict[str, float]:
+        out = {}
+        for tid in self._to:
+            a, b = self._from.get(tid, self._to[tid]), self._to[tid]
+            d = (b - a + 540) % 360 - 180                     # shortest way round
+            out[tid] = a + d * self._t
+        return out
+
+    def _glyph(self, icon: str, color: str) -> QPixmap:
+        key = (icon, color)
+        if key not in self._pix:
+            self._pix[key] = _icon(icon, color).pixmap(QSize(22, 22) * self.devicePixelRatioF())
+            self._pix[key].setDevicePixelRatio(self.devicePixelRatioF())
+        return self._pix[key]
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        side = min(self.width(), self.height()) - 8
+        c = QPointF(self.width() / 2, self.height() / 2)
+        R = side / 2
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(0, 0, 0, 90))
+        p.drawEllipse(c + QPointF(0, 6), R, R)                 # soft offset shadow
+        p.setBrush(QColor("#13151A"))
+        p.drawEllipse(c, R, R)
+        p.setPen(QPen(QColor(255, 255, 255, 18), 1))
+        p.setBrush(Qt.NoBrush)
+        rim = R - 12
+        p.drawEllipse(c, rim, rim)
+        ang = self._angles()
+        orbit_r = R * 0.68
+        for tid, label, icon in self.items:
+            a = math.radians(ang.get(tid, 0))
+            pos = QPointF(c.x() + orbit_r * math.sin(a), c.y() - orbit_r * math.cos(a))
+            lit = tid == self.start
+            if lit:
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(self.accent.red(), self.accent.green(), self.accent.blue(), 46))
+                p.drawEllipse(pos, 22, 22)
+                p.setPen(QPen(self.accent, 2.5, Qt.SolidLine, Qt.RoundCap))
+                span = 16 * 28
+                p.drawArc(QRectF(c.x() - rim, c.y() - rim, rim * 2, rim * 2),
+                          int((90 - ang.get(tid, 0)) * 16 - span / 2), int(span))
+            pm = self._glyph(icon, INK if lit else INK2)
+            p.drawPixmap(pos - QPointF(11, 11), pm)
+        p.setPen(QColor(INK))
+        p.setFont(_font(17, QFont.DemiBold))
+        name = next((lbl for t, lbl, _ in self.items if t == self.start), "")
+        p.drawText(QRectF(c.x() - 80, c.y() - 22, 160, 24), Qt.AlignCenter, name or "—")
+        p.setPen(QColor(INK3))
+        p.setFont(_font(12))
+        n = len(self.items)
+        p.drawText(QRectF(c.x() - 80, c.y() + 2, 160, 20), Qt.AlignCenter,
+                   f"{n} item{'s' if n != 1 else ''} · starts here" if name else f"{n} items")
+
+
+class _Group(QFrame):
+    """One rounded list with hairline separators between rows."""
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("group")
+        self.box = QVBoxLayout(self)
+        self.box.setContentsMargins(0, 0, 0, 0)
+        self.box.setSpacing(0)
+
+    def rows(self) -> list[QWidget]:
+        return [self.box.itemAt(i).widget() for i in range(self.box.count())]
+
+    def restyle(self):
+        rows = [r for r in self.rows() if r is not None]
+        for i, r in enumerate(rows):
+            r.setProperty("last", i == len(rows) - 1)
+            r.style().unpolish(r)
+            r.style().polish(r)
+
+
+class _ToolRow(QFrame):
+    def __init__(self, win: "SettingsWindow", tid: str, label: str, icon: str, sticky: bool, on: bool):
+        super().__init__()
+        self.tid, self.icon_name = tid, icon
+        self.setObjectName("row")
+        h = QHBoxLayout(self)
+        h.setContentsMargins(6, 8, 14, 8)
+        h.setSpacing(10)
+        for name, d, tip in (("chevron_up", -1, "Move up"), ("chevron_down", 1, "Move down")):
+            b = QToolButton()
+            b.setObjectName("move")
+            b.setIcon(_icon(name, INK2))
+            b.setIconSize(QSize(16, 16))
+            b.setToolTip(tip)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _=False, d=d: win.move(self.tid, d))
+            h.addWidget(b)
+        self.ic = QLabel()
+        self.ic.setFixedSize(22, 22)
+        h.addSpacing(4)
+        h.addWidget(self.ic)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        self.name = QLabel(label)
+        self.name.setFont(_font(14, QFont.DemiBold))
+        col.addWidget(self.name)
+        if not sticky:
+            kind = QLabel("Runs once")
+            kind.setObjectName("meta")
+            col.addWidget(kind)
+        h.addLayout(col, 1)
+        self.state = QLabel()
+        self.state.setObjectName("meta2")
+        self.state.setFixedWidth(28)
+        self.state.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        h.addWidget(self.state)
+        self.switch = ToggleSwitch(win.accent, on)
+        self.switch.setToolTip(f"Show {label} on the wheel")
+        h.addWidget(self.switch)
+        self.switch.toggled.connect(lambda _: (self._sync(), win.changed()))
+        self._sync()
+
+    def _sync(self):
+        on = self.switch.isChecked()
+        self.state.setText("Yes" if on else "No")
+        self.name.setStyleSheet(f"color: {INK if on else INK3};")
+        self.ic.setPixmap(_icon(self.icon_name, INK if on else INK3).pixmap(20, 20))
+
+
+class _ComboRow(QFrame):
+    def __init__(self, lead: QWidget | None, label: str, box: QComboBox):
+        super().__init__()
+        self.setObjectName("row")
+        h = QHBoxLayout(self)
+        h.setContentsMargins(16, 8, 10, 8)
+        h.setSpacing(12)
+        if lead is not None:
+            h.addWidget(lead)
+        lab = QLabel(label)
+        lab.setFont(_font(14, QFont.DemiBold))
+        h.addWidget(lab, 1)
+        box.setFixedWidth(250)
+        h.addWidget(box)
+
+
+# ---------------------------------------------------------------- window
+class SettingsWindow(QWidget):
+    """`base_cfg`: config.toml merged for this platform, without settings.json.
+    `on_save(settings)` is called with the new settings (already written to disk)."""
+
+    def __init__(self, base_cfg: dict, current: dict, has_hold: bool, accent: str,
+                 on_save: Callable[[dict], None], settings_path: Path | None = None):
+        super().__init__()
+        self.base = base_cfg
+        self.accent = accent
+        self.on_save = on_save
+        self.settings_path = settings_path
+        self.has_hold = has_hold
+        merged = st.apply(base_cfg, current)
+        self.tools = {tid: tools_mod.build(tid, tc) for tid, tc in base_cfg["tools"].items()}
+        self.order, enabled = st.wheel_order(merged)
+
+        self.setWindowTitle("Orbit settings")
+        self.resize(900, 680)
+        self.setMinimumSize(780, 520)
+        self.setFont(_font(13))
+        self.setStyleSheet(self._qss())
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ---- left: the wheel, live
+        left = QFrame()
+        left.setObjectName("panel")
+        left.setFixedWidth(320)
+        lv = QVBoxLayout(left)
+        lv.setContentsMargins(28, 30, 28, 24)
+        lv.setSpacing(6)
+        title = QLabel("Orbit")
+        title.setFont(_font(22, QFont.Bold))
+        lv.addWidget(title)
+        sub = QLabel("Your dial, your wheel.")
+        sub.setObjectName("meta2")
+        lv.addWidget(sub)
+        lv.addSpacing(18)
+        self.preview = WheelPreview(accent)
+        lv.addWidget(self.preview, 0, Qt.AlignHCenter)
+        lv.addSpacing(14)
+        self.how = QLabel()
+        self.how.setObjectName("meta2")
+        self.how.setWordWrap(True)
+        self.how.setAlignment(Qt.AlignHCenter)
+        lv.addWidget(self.how)
+        lv.addStretch(1)
+        reset = QPushButton("  Reset to config")
+        reset.setObjectName("quiet")
+        reset.setIcon(_icon("rotate_ccw", INK2))
+        reset.setIconSize(QSize(14, 14))
+        reset.setCursor(Qt.PointingHandCursor)
+        reset.setToolTip("Forget these choices and use config.toml as written")
+        reset.clicked.connect(self.reset)
+        lv.addWidget(reset, 0, Qt.AlignLeft)
+        root.addWidget(left)
+
+        # ---- right: the lists
+        right = QVBoxLayout()
+        right.setContentsMargins(0, 0, 0, 0)
+        right.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body = QWidget()
+        body.setObjectName("body")
+        scroll.setWidget(body)
+        v = QVBoxLayout(body)
+        v.setContentsMargins(32, 30, 32, 24)
+        v.setSpacing(0)
+
+        v.addWidget(self._heading("Wheel items"))
+        v.addSpacing(4)
+        v.addWidget(self._help("Switch on what the wheel shows. The order runs clockwise from the top."))
+        v.addSpacing(14)
+        self.items_group = _Group()
+        self.rows: dict[str, _ToolRow] = {}
+        for tid in self.order:
+            t = self.tools[tid]
+            row = _ToolRow(self, tid, t.label, t.icon, t.sticky, tid in set(enabled))
+            self.rows[tid] = row
+            self.items_group.box.addWidget(row)
+        self.items_group.restyle()
+        v.addWidget(self.items_group)
+
+        v.addSpacing(34)
+        v.addWidget(self._heading("Dial"))
+        v.addSpacing(4)
+        v.addWidget(self._help("What the dial does when the wheel is closed."))
+        v.addSpacing(14)
+        dial = _Group()
+        self.start = self._combo()
+        for tid in self.order:
+            if self.tools[tid].sticky:
+                self.start.addItem(_icon(self.tools[tid].icon, INK2), self.tools[tid].label, tid)
+        self.start.setCurrentIndex(max(0, self.start.findData(merged.get("default_tool", self.order[0]))))
+        self.start.currentIndexChanged.connect(lambda _: self.changed())
+        lead = QLabel()
+        lead.setPixmap(_icon("star", INK2).pixmap(16, 16))
+        lead.setFixedWidth(28)
+        dial.box.addWidget(_ComboRow(lead, "Start with", self.start))
+        self.gesture_boxes: dict[str, QComboBox] = {}
+        for g in st.GESTURES:
+            box = self._gesture_box(g, st.gesture_action(base_cfg, g), st.gesture_action(merged, g))
+            box.currentIndexChanged.connect(lambda _: self.changed())
+            self.gesture_boxes[g] = box
+            row = _ComboRow(GesturePips(g, INK2), GESTURE_NAMES[g], box)
+            if g == "hold" and not has_hold:
+                row.setToolTip("macOS doesn't pass the hold to apps; on Windows it needs Orbit running as admin.")
+            dial.box.addWidget(row)
+        dial.restyle()
+        v.addWidget(dial)
+        v.addSpacing(10)
+        self.note = QLabel()
+        self.note.setObjectName("warn")
+        self.note.setWordWrap(True)
+        v.addWidget(self.note)
+        if not has_hold:
+            n = QLabel("Press and hold can't be read on this computer (macOS keeps it from apps; Windows "
+                       "needs Orbit running as admin).")
+            n.setObjectName("meta")
+            n.setWordWrap(True)
+            v.addSpacing(4)
+            v.addWidget(n)
+        v.addStretch(1)
+        right.addWidget(scroll, 1)
+
+        bar_frame = QFrame()
+        bar_frame.setObjectName("bar")
+        bar = QHBoxLayout(bar_frame)
+        bar.setContentsMargins(32, 14, 32, 16)
+        bar.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setCursor(Qt.PointingHandCursor)
+        cancel.clicked.connect(self.close)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setObjectName("primary")
+        self.save_btn.setCursor(Qt.PointingHandCursor)
+        self.save_btn.setDefault(True)
+        self.save_btn.clicked.connect(self.save)
+        bar.addWidget(cancel)
+        bar.addSpacing(8)
+        bar.addWidget(self.save_btn)
+        right.addWidget(bar_frame)
+        root.addLayout(right, 1)
+        self.changed()
+
+    # ------------------------------------------------------------------ building
+    @staticmethod
+    def _heading(text: str) -> QLabel:
+        lab = QLabel(text)
+        lab.setFont(_font(17, QFont.DemiBold))
+        return lab
+
+    @staticmethod
+    def _help(text: str) -> QLabel:
+        lab = QLabel(text)
+        lab.setObjectName("meta2")
+        lab.setWordWrap(True)
+        return lab
+
+    @staticmethod
+    def _combo() -> QComboBox:
+        box = QComboBox()
+        box.setCursor(Qt.PointingHandCursor)
+        box.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        box.setMinimumContentsLength(16)
+        box.setIconSize(QSize(16, 16))
+        return box
+
+    def _gesture_box(self, g: str, from_config, current) -> QComboBox:
+        box = self._combo()
+        values = [v for _, v in PRESETS]
+        if from_config not in values:
+            steps = len(from_config) if isinstance(from_config, list) else 1
+            box.addItem("Your config's action" + (f" · {steps} steps" if steps > 1 else ""), from_config)
+            box.setItemData(box.count() - 1, _summary(from_config) if not isinstance(from_config, list)
+                            else "\n".join(map(str, from_config)), Qt.ToolTipRole)
+        for label, val in PRESETS:
+            box.addItem(label, val)
+        box.insertSeparator(box.count())
+        for tid in self.order:
+            if self.tools[tid].sticky:
+                box.addItem(_icon(self.tools[tid].icon, INK2), f"Switch to {self.tools[tid].label}", f"tool:{tid}")
+        if box.findData(current) < 0:
+            box.insertItem(0, f"Custom: {_summary(current)}", current)
+        box.setCurrentIndex(max(0, box.findData(current)))
+        if g == "hold" and not self.has_hold:
+            box.setEnabled(False)
+        return box
+
+    def move(self, tid: str, d: int):
+        i = self.order.index(tid)
+        j = i + d
+        if not 0 <= j < len(self.order):
+            return
+        self.order[i], self.order[j] = self.order[j], self.order[i]
+        for k, t in enumerate(self.order):
+            self.items_group.box.insertWidget(k, self.rows[t])
+        self.items_group.restyle()
+        self.changed()
+
+    # ------------------------------------------------------------------ state
+    def collect(self) -> dict:
+        enabled = [t for t in self.order if self.rows[t].switch.isChecked()]
+        return {
+            "wheel": {"order": list(self.order), "enabled": enabled},
+            "default_tool": self.start.currentData(),
+            "gestures": {g: b.currentData() for g, b in self.gesture_boxes.items() if b.isEnabled()},
+        }
+
+    def changed(self):
+        s = self.collect()
+        on = s["wheel"]["enabled"]
+        self.preview.set_items([(t, self.tools[t].label, self.tools[t].icon) for t in on], s["default_tool"])
+        opens = [GESTURE_NAMES[g].lower() for g, b in self.gesture_boxes.items()
+                 if b.isEnabled() and b.currentData() == st.OPEN_WHEEL]
+        self.how.setText(("Open it with a " + " or ".join(opens) + "." if opens else
+                          "Open it with a triple press.") + "\nTurn to pick, press to choose.")
+        problems = []
+        if not on:
+            problems.append("Switch on at least one item.")
+        if len(on) > MAX_ITEMS:
+            problems.append(f"{len(on)} items is too many to pick by feel. Keep it to {MAX_ITEMS} or fewer; 8 reads best.")
+        if not opens:
+            problems.append("No gesture opens the wheel, so a triple press will.")
+        self.note.setText("\n".join(problems))
+        self.note.setVisible(bool(problems))
+        self.save_btn.setEnabled(0 < len(on) <= MAX_ITEMS)
+
+    def save(self):
+        s = self.collect()
+        st.save(s, self.settings_path)
+        self.on_save(s)
+        self.close()
+
+    def reset(self):
+        st.save({}, self.settings_path)
+        self.on_save({})
+        self.close()
+
+    def _qss(self) -> str:
+        a = self.accent
+        return f"""
+        QWidget {{ background: {CANVAS}; color: {INK}; }}
+        QFrame#panel {{ background: {PANEL}; border-right: 1px solid {HAIR}; }}
+        QFrame#panel QLabel, QFrame#panel QPushButton {{ background: transparent; }}
+        QScrollArea, #body {{ background: {CANVAS}; }}
+        QLabel#meta {{ color: {INK3}; font-size: 12px; background: transparent; }}
+        QLabel#meta2 {{ color: {INK2}; font-size: 13px; background: transparent; }}
+        QLabel#warn {{ color: {WARN}; font-size: 13px; background: transparent; }}
+        QFrame#group {{ background: {GROUP}; border: 1px solid {HAIR}; border-radius: 12px; }}
+        QFrame#row {{ background: transparent; border: none; border-bottom: 1px solid {HAIR}; }}
+        QFrame#row[last="true"] {{ border-bottom: none; }}
+        QFrame#row QLabel {{ background: transparent; }}
+        QToolButton#move {{ background: transparent; border: none; border-radius: 6px; padding: 3px; }}
+        QToolButton#move:hover {{ background: #262A34; }}
+        QToolButton#move:focus {{ border: 1px solid {a}; }}
+        QComboBox {{ background: #20242D; border: 1px solid #2D323D; border-radius: 8px;
+                     padding: 6px 10px; font-size: 13px; }}
+        QComboBox:hover {{ border-color: #3B4150; }}
+        QComboBox:focus {{ border-color: {a}; }}
+        QComboBox:disabled {{ color: {INK3}; background: transparent; border-color: {HAIR}; }}
+        QComboBox::drop-down {{ border: none; width: 26px; }}
+        QComboBox::down-arrow {{ image: url("{QUrl(assets.tinted_url("chevron_down", INK2)).toLocalFile()}");
+                                 width: 14px; height: 14px; }}
+        QComboBox QAbstractItemView {{ background: #20242D; border: 1px solid #2D323D; padding: 4px;
+                                       selection-background-color: {a}; selection-color: #0B0D12;
+                                       outline: none; }}
+        QPushButton {{ background: #20242D; border: 1px solid #2D323D; border-radius: 8px;
+                       padding: 8px 18px; font-size: 13px; }}
+        QPushButton:hover {{ border-color: #3B4150; }}
+        QPushButton:focus {{ border-color: {a}; }}
+        QPushButton#primary {{ background: {a}; color: #0B0D12; border: 1px solid {a}; font-weight: 600; }}
+        QPushButton#primary:hover {{ background: #91ACFF; }}
+        QPushButton#primary:disabled {{ background: #2A2F3A; border-color: #2A2F3A; color: {INK3}; }}
+        QPushButton#quiet {{ background: transparent; border: none; color: {INK2}; padding: 6px 4px; }}
+        QPushButton#quiet:hover {{ color: {INK}; }}
+        QFrame#bar {{ background: {CANVAS}; border-top: 1px solid {HAIR}; }}
+        QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px 2px; }}
+        QScrollBar::handle:vertical {{ background: #2D323D; border-radius: 3px; min-height: 30px; }}
+        QScrollBar::handle:vertical:hover {{ background: #3B4150; }}
+        QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+        QToolTip {{ background: #20242D; color: {INK}; border: 1px solid #2D323D; padding: 4px 8px; }}
+        """

@@ -17,6 +17,7 @@ python -m PyInstaller --noconfirm --windowed --name Orbit \
   --hidden-import orbit.platform.mac.input_media \
   --hidden-import orbit.platform.mac.output \
   --hidden-import orbit.platform.mac.overlay \
+  --hidden-import orbit.ui.settings_window \
   packaging/orbit_main.py
 
 PLIST=dist/Orbit.app/Contents/Info.plist

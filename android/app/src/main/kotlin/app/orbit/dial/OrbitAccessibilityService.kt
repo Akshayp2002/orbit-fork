@@ -51,6 +51,16 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
         private set
     private val recent = ArrayDeque<String>()       // most recent first
 
+    private var prefsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
+    private val rebuild = Runnable {
+        engine.shutdown()
+        engine = buildEngine()
+        Orbit.log("settings applied: wheel ${engine.wheel.map { it.id }}, start ${engine.tool.id}")
+    }
+
+    private fun buildEngine(): Engine =
+        SettingsStore.load(this).buildEngine(this, overlay, Orbit.rotation, defaultTools())
+
     private val ticker = object : Runnable {
         override fun run() { engine.tick(); main.postDelayed(this, 50) }
     }
@@ -59,7 +69,10 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
         super.onServiceConnected()
         Orbit.a11y = this
         overlay = OverlayController(this)
-        engine = Engine(this, overlay, Orbit.rotation, defaultTools())
+        engine = buildEngine()
+        prefsListener = SettingsStore.listen(this) {
+            main.removeCallbacks(rebuild); main.postDelayed(rebuild, 150)          // one rebuild per save
+        }
         scope.launch { Orbit.events.collect { ev -> engine.handle(ev) } }
         main.post(ticker)
         if (BuildConfig.DEBUG) registerDebugInjector()
@@ -86,6 +99,8 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
     }
 
     override fun onDestroy() {
+        prefsListener?.let { Orbit.prefs(this).unregisterOnSharedPreferenceChangeListener(it) }
+        main.removeCallbacks(rebuild)
         debugRx?.let { runCatching { unregisterReceiver(it) } }
         main.removeCallbacks(ticker)
         scope.cancel()

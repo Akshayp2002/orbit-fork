@@ -17,8 +17,9 @@ from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from orbit.core import config as config_mod
+from orbit.core import settings as user_settings
 from orbit.core.engine import Engine
-from orbit.core.events import InputEvent
+from orbit.core.events import Capability, InputEvent
 from orbit.platform import get_platform
 from orbit.ui.qtui import QtUI
 
@@ -106,8 +107,8 @@ def main(argv=None):
         log.error("Orbit is already running")
         return 1
 
-    cfg, cfg_path = config_mod.load(args.config)
-    log.info("config: %s", cfg_path)
+    cfg, cfg_path = config_mod.load(args.config, user_settings=user_settings.load())
+    log.info("config: %s (+ %s)", cfg_path, user_settings.path())
 
     sources = plat.create_sources(cfg)
     if args.dev:
@@ -131,8 +132,10 @@ def main(argv=None):
             log.info("source up: %s%s", s.describe(), "" if s.available else " (unavailable)")
         except Exception:
             log.exception("source failed: %s", s.name)
-    engine = Engine(cfg, out, ui, sources)
-    bus.event.connect(engine.handle, Qt.QueuedConnection)
+    # The engine is rebuilt in place when settings change; everything holds `live`.
+    live = {"engine": Engine(cfg, out, ui, sources)}
+    engine = live["engine"]
+    bus.event.connect(lambda ev: live["engine"].handle(ev), Qt.QueuedConnection)
 
     services = plat.create_services(cfg)
     for svc in services:
@@ -143,7 +146,7 @@ def main(argv=None):
 
     ticker = QTimer()
     ticker.setInterval(50)
-    ticker.timeout.connect(engine.tick)
+    ticker.timeout.connect(lambda: live["engine"].tick())
     ticker.start()
 
     # ---- tray
@@ -155,7 +158,41 @@ def main(argv=None):
     a_log = QAction("Open log")
     a_log.triggered.connect(lambda: out.launch(str(data_dir() / "orbit.log")))
     a_wheel = QAction("Show wheel")
-    a_wheel.triggered.connect(engine.open_wheel)
+    a_wheel.triggered.connect(lambda: live["engine"].open_wheel())
+    a_settings = QAction("Settings…")
+
+    def apply_settings(new: dict):
+        try:
+            cfg2, _ = config_mod.load(args.config, user_settings=new)
+        except Exception:
+            log.exception("settings rejected; keeping the current ones")
+            return
+        old = live["engine"]
+        if old.state.value == "wheel":
+            ui.wheel_cancel()
+        old.shutdown()
+        live["engine"] = Engine(cfg2, out, ui, sources)
+        log.info("settings applied — wheel: %s, start: %s, wheel opens with: %s",
+                 live["engine"].wheel_ids, live["engine"].tool.id, sorted(live["engine"].open_with))
+
+    windows = []
+
+    def open_settings():
+        from orbit.ui.settings_window import SettingsWindow
+        if windows and windows[0].isVisible():
+            windows[0].raise_()
+            windows[0].activateWindow()
+            return
+        base, _ = config_mod.load(args.config)
+        e = live["engine"]
+        has_hold = Capability.HOLD in e.caps or Capability.PRESS_RELEASE in e.caps
+        w = SettingsWindow(base, user_settings.load(), has_hold, cfg["ui"]["accent"], apply_settings)
+        windows[:] = [w]
+        w.show()
+        w.raise_()
+        w.activateWindow()
+
+    a_settings.triggered.connect(open_settings)
     a_restart = QAction("Restart (reload config)")
     a_quit = QAction("Quit")
     a_quit.triggered.connect(app.quit)
@@ -180,7 +217,7 @@ def main(argv=None):
             a.toggled.connect(lambda on, s=svc: setattr(s, "enabled", on))
             toggles.append(a)
 
-    for a in (a_wheel, a_cfg, a_log, a_restart):
+    for a in (a_wheel, a_settings, a_cfg, a_log, a_restart):
         menu.addAction(a)
     menu.addSeparator()
     for a in toggles:
@@ -196,7 +233,7 @@ def main(argv=None):
         if done:
             return
         done.append(True)
-        engine.shutdown()
+        live["engine"].shutdown()
         for s in [*sources, *services]:
             try:
                 s.stop()

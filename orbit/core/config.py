@@ -69,10 +69,15 @@ def apply_platform(cfg: dict, platform: str | None = None) -> dict:
     return _merge(cfg, overrides.get(platform, {}))
 
 
-def load(explicit: str | None = None, platform: str | None = None) -> tuple[dict, Path]:
+def load(explicit: str | None = None, platform: str | None = None,
+         user_settings: dict | None = None) -> tuple[dict, Path]:
+    """`user_settings`: the Settings window's choices (orbit.core.settings), layered last."""
     path = find(explicit)
     with path.open("rb") as f:
         cfg = apply_platform(_merge(DEFAULTS, tomllib.load(f)), platform)
+    if user_settings:
+        from orbit.core import settings
+        cfg = settings.apply(cfg, user_settings)
     validate(cfg)
     return cfg, path
 

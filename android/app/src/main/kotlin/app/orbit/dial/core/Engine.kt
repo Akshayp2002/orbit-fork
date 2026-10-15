@@ -28,7 +28,11 @@ class Engine(
     /** Items per report when spinning fast. Off (1): two deliberate clicks ~0.45 s apart
      *  look the same as a spin with dropped clicks, and 2 skipped items in real use. */
     private val wheelAccel: Int = 1,
+    /** Tools on the wheel, in order (the rest stay usable as default / gesture targets). */
+    wheelIds: List<String> = tools.map { it.id },
 ) {
+    val wheel: List<Tool> = wheelIds.mapNotNull { id -> tools.firstOrNull { it.id == id } }.ifEmpty { tools }
+
     enum class State { TOOL, WHEEL }
 
     var state = State.TOOL
@@ -50,19 +54,25 @@ class Engine(
     fun tick(now: Long = Clock.now()) {
         tool.tick(actions, now)?.let(ui::hud)
         if (state == State.WHEEL && now - wheelLast > dismissAfterMs) {
-            if (tools[index].sticky) commit() else cancel()
+            if (wheel[index].sticky) commit() else cancel()
         }
+    }
+
+    /** Before this engine is replaced (settings changed): close the wheel, release the tool. */
+    fun shutdown() {
+        if (state == State.WHEEL) ui.wheelCancel()
+        tool.leave(actions)
     }
 
     fun openWheel() {
         if (state == State.WHEEL) return
         tool.leave(actions)
         state = State.WHEEL
-        index = tools.indexOf(tool).coerceAtLeast(0)
+        index = wheel.indexOf(tool).coerceAtLeast(0)
         wheelLast = Clock.now()
         wheelSpin = SpinTracker()
         sync()
-        ui.wheelOpen(tools, index)
+        ui.wheelOpen(wheel, index)
     }
 
     fun setTool(id: String) {
@@ -90,6 +100,7 @@ class Engine(
             is Gesture.Launch -> actions.launch(g.pkg)
             is Gesture.Global -> actions.global(g.action)
             Gesture.LastTool -> lastTool()
+            is Gesture.SwitchTo -> setTool(g.toolId)
             Gesture.OpenWheel -> openWheel()
             null -> {}
         }
@@ -99,7 +110,7 @@ class Engine(
         wheelLast = Clock.now()
         when (ev.kind) {
             Kind.ROTATE -> {
-                val n = tools.size
+                val n = wheel.size
                 index = ((index + wheelSteps(ev.delta)) % n + n) % n
                 actions.haptic()
                 ui.wheelMove(index, if (ev.delta > 0) 1 else -1)
@@ -117,7 +128,7 @@ class Engine(
     }
 
     private fun commit() {
-        val item = tools[index]
+        val item = wheel[index]
         ui.wheelCommit(index)
         state = State.TOOL
         if (item.sticky) {
@@ -157,6 +168,7 @@ sealed interface Gesture {
     data class Global(val action: String) : Gesture
     data object LastTool : Gesture
     data object OpenWheel : Gesture
+    data class SwitchTo(val toolId: String) : Gesture
 }
 
 data class Hud(val icon: String, val title: String, val detail: String = "",

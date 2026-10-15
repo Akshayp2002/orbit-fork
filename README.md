@@ -36,7 +36,9 @@ python -m orbit              # asks for admin (only needed for press-and-hold)
 python -m orbit --no-elevate # everything except hold
 python -m orbit --dev        # also accept test events: python -m orbit.inject double
 ```
-Tray icon: Show wheel, Open config, Open log, Restart, Quit; toggle "Hide Windows volume
+Tray icon: Show wheel, Settings (wheel items on/off and order, start tool, what each press
+does; saved to `settings.json` next to your config and applied at once), Open config, Open
+log, Restart, Quit; toggle "Hide Windows volume
 bar". Log: `%LOCALAPPDATA%\Orbit\orbit.log`. Brightness drives Twinkle Tray if installed.
 
 ## macOS

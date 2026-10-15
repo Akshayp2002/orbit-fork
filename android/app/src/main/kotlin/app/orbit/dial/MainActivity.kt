@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.text.TextUtils
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -52,16 +53,35 @@ import androidx.compose.ui.unit.sp
 import app.orbit.dial.core.DialEvent
 import app.orbit.dial.core.Kind
 
+/** Orbit's dark world as Material roles (same palette as the wheel overlay and desktop). */
+val OrbitColors = darkColorScheme(
+    primary = Color(0xFF8FA8FF), onPrimary = Color(0xFF0B1230),
+    primaryContainer = Color(0xFF26325C), onPrimaryContainer = Color(0xFFDCE3FF),
+    secondary = Color(0xFFB7C1DE), onSecondary = Color(0xFF1E2538),
+    tertiary = Color(0xFFF2B46B), onTertiary = Color(0xFF3A2400),
+    background = Color(0xFF101217), onBackground = Color(0xFFF2F4F8),
+    surface = Color(0xFF101217), onSurface = Color(0xFFF2F4F8),
+    surfaceVariant = Color(0xFF20242D), onSurfaceVariant = Color(0xFFA4AAB8),
+    surfaceContainerLowest = Color(0xFF0B0D11), surfaceContainerLow = Color(0xFF151820),
+    surfaceContainer = Color(0xFF1A1D25), surfaceContainerHigh = Color(0xFF20242D),
+    surfaceContainerHighest = Color(0xFF272B35),
+    outline = Color(0xFF4A5060), outlineVariant = Color(0xFF262A34),
+)
+
 /** Setup checklist (each step re-checked on resume), test buttons, live log. */
 class MainActivity : ComponentActivity() {
     private var refresh by mutableIntStateOf(0)
+    private var customizing by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         applyDebugExtras(intent)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF7C9CFF), background = Color(0xFF0E0F12))) {
-                Setup(refresh)
+            MaterialTheme(colorScheme = OrbitColors) {
+                if (customizing) {
+                    BackHandler { customizing = false }
+                    CustomizeScreen { customizing = false }
+                } else Setup(refresh)
             }
         }
     }
@@ -71,6 +91,7 @@ class MainActivity : ComponentActivity() {
 
     /** adb shell am start -n app.orbit.dial/.MainActivity --ez require_bt false  (emulator testing) */
     private fun applyDebugExtras(i: Intent) {
+        if (i.getBooleanExtra("customize", false)) customizing = true
         if (i.hasExtra("require_bt")) Orbit.setRequireBluetooth(this, i.getBooleanExtra("require_bt", true))
         i.getStringExtra("emit")?.let { spec ->           // --es emit "rotate:1" | "double" | "click" ...
             val (k, d) = (spec.split(":") + "0").let { it[0] to it[1].toIntOrNull() }
@@ -117,6 +138,7 @@ class MainActivity : ComponentActivity() {
                 Step("5", "Modify system settings", "Optional: for the Brightness tool.", writeOn()) {
                     startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
                 }
+                Button({ customizing = true }, Modifier.fillMaxWidth()) { Text("Customize wheel and gestures") }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Only with Bluetooth earbuds", color = Color.White, fontSize = 15.sp)

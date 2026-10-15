@@ -67,6 +67,10 @@ class Engine:
             if not self.open_with:
                 self.open_with = {g_cfg.get("open_wheel_fallback", "triple")}
             log.warning("press-and-hold unavailable; wheel opens with %s", sorted(self.open_with))
+        if not self.open_with:                  # every gesture reassigned: keep a way in
+            self.open_with = {g_cfg.get("open_wheel_fallback", "triple")}
+            self.gestures.pop(next(iter(self.open_with)), None)
+            log.warning("no gesture opens the wheel; using %s", sorted(self.open_with))
 
         self.dismiss_after = cfg["wheel"].get("dismiss_after_ms", 6000) / 1000
         self.duck = float(cfg["wheel"].get("duck_volume", 0.5))   # 0 or 1 = off
