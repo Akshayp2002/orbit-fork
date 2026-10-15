@@ -48,3 +48,19 @@ def test_every_mac_override_combo_is_valid():
 def test_bad_mac_combo_rejected():
     with pytest.raises(ValueError):
         K.parse("hyper+z")
+
+
+def test_packaged_app_copies_its_default_config_to_the_user_dir(tmp_path, monkeypatch):
+    """The bundle's config is replaced on every rebuild; a packaged app must run from
+    (and let the user edit) a copy in the user config dir."""
+    import sys
+    from orbit.core import config as config_mod
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "config.toml").write_text(config_mod.PROJECT_CONFIG.read_text(encoding="utf-8"), encoding="utf-8")
+    user = tmp_path / "user" / "config.toml"
+    monkeypatch.setattr(config_mod, "user_config_path", lambda: user)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(bundle), raising=False)
+    assert config_mod.find(None) == user and user.exists()
+    assert config_mod.find(None) == user           # second run: uses the copy

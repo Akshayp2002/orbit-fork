@@ -44,7 +44,10 @@ def _merge(base: dict, over: dict) -> dict:
 
 
 def find(explicit: str | None) -> Path:
-    for p in (Path(explicit) if explicit else None, user_config_path(), PROJECT_CONFIG):
+    # A packaged app (PyInstaller) has its default config inside the bundle, which is
+    # replaced on every rebuild: never edit that one. It is copied to the user dir below.
+    frozen = getattr(sys, "frozen", False)
+    for p in (Path(explicit) if explicit else None, user_config_path(), None if frozen else PROJECT_CONFIG):
         if p and p.exists():
             return p
     # packaged app (PyInstaller): ship the default, copy it where the user can edit it
