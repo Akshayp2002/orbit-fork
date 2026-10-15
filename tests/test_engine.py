@@ -72,9 +72,9 @@ def test_starts_on_volume_with_passthrough():
     assert rot.passthrough is True
 
 
-def test_hold_opens_wheel_rotate_click_selects():
+def test_double_opens_wheel_rotate_click_selects():
     e, out, ui, rot = make()
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     assert e.state == State.WHEEL and rot.passthrough is False
     e.handle(ev(Kind.ROTATE, 2))
     e.handle(ev(Kind.CLICK))
@@ -86,14 +86,14 @@ def test_hold_opens_wheel_rotate_click_selects():
 
 def test_wheel_wraps_backwards():
     e, *_ = make()
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     e.handle(ev(Kind.ROTATE, -1))
     assert e.wheel_ids[e.index] == "voice"
 
 
-def test_hold_again_cancels():
+def test_hold_closes_open_wheel():
     e, out, ui, rot = make()
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     e.handle(ev(Kind.ROTATE, 3))
     e.handle(ev(Kind.HOLD))
     assert e.state == State.TOOL and e.tool.id == "volume" and rot.passthrough is True
@@ -101,7 +101,7 @@ def test_hold_again_cancels():
 
 def test_one_shot_runs_and_keeps_tool():
     e, out, *_ = make()
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     e.handle(ev(Kind.ROTATE, -1))   # voice
     e.handle(ev(Kind.CLICK))
     assert ("keys", "win+h") in out.log and e.tool.id == "volume"
@@ -109,12 +109,12 @@ def test_one_shot_runs_and_keeps_tool():
 
 def test_timeout_selects_sticky_but_never_fires_action():
     e, out, *_ = make()
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     e.handle(ev(Kind.ROTATE, 1))     # switcher
     e._wheel_last = time.monotonic() - 99
     e.tick()
     assert e.tool.id == "switcher"
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     e.handle(ev(Kind.ROTATE, -2))    # voice (one-shot)
     e._wheel_last = time.monotonic() - 99
     e.tick()
@@ -161,8 +161,14 @@ def test_switcher_releases_alt_when_wheel_opens():
     e, out, *_ = make()
     e.set_tool("switcher")
     e.handle(ev(Kind.ROTATE, 1))
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     assert ("up", "alt") in out.log
+
+
+def test_hold_starts_claude_dictation():
+    e, out, *_ = make()
+    e.handle(ev(Kind.HOLD))
+    assert e.state == State.TOOL and ("keys", "ctrl+alt+d") in out.log
 
 
 def test_no_hold_source_still_opens_with_double():

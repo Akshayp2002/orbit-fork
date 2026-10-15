@@ -16,9 +16,10 @@ audio_endpoint_match = "CMF Buds Pro 2"
 # What presses do while a tool is active, unless that tool defines its own click/double/triple.
 click  = "media:play_pause"
 triple = "last_tool"        # flip between the two most recent tools
+hold   = "keys:ctrl+alt+d"  # Claude Quick Entry dictation (set the same key in Claude > Settings > Keyboard shortcuts)
 # Gestures that open the wheel (they win over any tool binding). Inside the wheel,
-# the same gestures close it without changing anything.
-open_wheel = ["double", "hold"]
+# double / triple / hold close it without changing anything.
+open_wheel = ["double"]
 # Used if none of the above can be read (e.g. only "hold" listed and not running as admin).
 open_wheel_fallback = "triple"
 

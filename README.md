@@ -1,7 +1,7 @@
 # Orbit — a dial + wheel menu for CMF Buds Pro 2
 
 The case dial on the CMF Buds Pro 2 becomes a Surface-Dial-style controller:
-**double-press** (or hold) to open a wheel, **turn** to pick a tool, **press** to use it. After
+**double-press** to open a wheel, **turn** to pick a tool, **press** to use it. After
 that, turning and pressing drive the chosen tool (volume, scroll, zoom,
 window switcher, undo, desktops, tabs...). Everything is set in `config.toml`.
 
@@ -25,7 +25,7 @@ Log: `%LOCALAPPDATA%\Orbit\orbit.log`.
 | Press | tool's click, else play/pause | **select** |
 | Double press | **open wheel** | close, no change |
 | Triple press | back to the previous tool (Volume: next track) | close, no change |
-| Hold (admin) | open wheel | close, no change |
+| Hold (admin) | Claude Quick Entry dictation (`ctrl+alt+d`, set the same key in Claude's settings) | close, no change |
 | Wait 5 s | — | keeps the highlighted tool (one-shot actions never fire on timeout) |
 
 An on-screen tag shows the active tool and its value whenever you use the dial,

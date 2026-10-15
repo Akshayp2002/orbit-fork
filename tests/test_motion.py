@@ -92,10 +92,10 @@ def test_reverse_brakes_momentum():
 
 def test_wheel_ducks_and_restores():
     e, out, ui, rot = make()
-    e.handle(ev(Kind.HOLD))
+    e.handle(ev(Kind.DOUBLE))
     assert rot.duck[-1] == 0.5 and rot.passthrough is False
     e.handle(ev(Kind.CLICK))           # back to volume
     assert rot.duck[-1] is None and rot.passthrough is True
-    e.handle(ev(Kind.HOLD))
-    e.handle(ev(Kind.HOLD))            # cancel also restores
+    e.handle(ev(Kind.DOUBLE))
+    e.handle(ev(Kind.DOUBLE))            # cancel also restores
     assert rot.duck[-1] is None
