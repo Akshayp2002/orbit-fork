@@ -46,11 +46,34 @@ def test_reverse_click_from_off_grid_level_is_not_lost():
     assert got == [-1]
 
 
-def test_stale_echo_after_recenter_is_ignored_and_resent():
-    d, got = make(0.80)
-    our_set(d, 56.25)
-    dial(d, 80.0)                             # buds re-send their old level
-    assert got == [] and d._reapply == pytest.approx(0.5625)
+def test_click_landing_on_buds_old_level_after_recenter_counts():
+    """Calibration capture: buds at 71/127, we recenter one step down to 64, the
+    user clicks up again -> 71. That is a click, not the buds re-sending 71."""
+    d, got = make(71 / 127)
+    our_set(d, 64 / 127 * 100)
+    dial(d, 64 / 127 * 100)                   # Windows echoes our set ~1 ms later
+    dial(d, 71 / 127 * 100)
+    assert got == [1]
+
+
+def test_click_in_flight_during_recenter_is_one_step_not_plus2_minus2():
+    """orbit.log 15:46:20: buds at 95/127, recenter to 64, Windows echo, then the
+    user's click down (87, measured from 95) and a Windows re-apply of ours.
+    The old logic emitted +2 then -2 and lost the click."""
+    d, got = make(95 / 127)
+    our_set(d, 64 / 127 * 100)
+    dial(d, 64 / 127 * 100)                   # echo
+    dial(d, 87 / 127 * 100)                   # click from their old level
+    dial(d, 64 / 127 * 100)                   # Windows puts ours back
+    assert got == [-1]
+
+
+def test_recenters_land_on_the_16_step_grid():
+    d, got = make(0.5, passthrough=True)
+    for u in (71, 79, 87, 95):
+        dial(d, u / 127 * 100)
+    assert got == [1, 1, 1, 1] and d.grid == 16
+    assert round(d._snap_home(0.53) * 127) == 64      # step 8 of 16 = what the buds send
 
 
 def test_click_before_buds_take_recenter_counts_once():

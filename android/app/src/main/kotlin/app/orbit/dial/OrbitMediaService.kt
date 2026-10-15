@@ -97,7 +97,8 @@ class OrbitMediaService : Service() {
                 ourSet = idx to Clock.now()
                 am.setStreamVolume(stream, idx, 0)
             }
-        }, { ev -> main.post { Orbit.emit(ev) } }, "android-volume")
+        }, { ev -> main.post { Orbit.emit(ev) } }, "android-volume",
+            streamSteps = am.getStreamMaxVolume(stream).coerceAtLeast(1))
         dial.rebase()
         Orbit.media = this
         Orbit.rotation.replayInto(this)

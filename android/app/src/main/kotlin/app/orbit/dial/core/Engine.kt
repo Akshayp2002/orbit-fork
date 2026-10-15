@@ -25,6 +25,9 @@ class Engine(
     private val openWith: Set<Kind> = setOf(Kind.DOUBLE),
     private val dismissAfterMs: Long = 5000,
     private val duck: Float = 0.5f,
+    /** Items per report when spinning fast. Off (1): two deliberate clicks ~0.45 s apart
+     *  look the same as a spin with dropped clicks, and 2 skipped items in real use. */
+    private val wheelAccel: Int = 1,
 ) {
     enum class State { TOOL, WHEEL }
 
@@ -36,6 +39,7 @@ class Engine(
         private set
     private var prevTool: Tool? = null
     private var wheelLast = 0L
+    private var wheelSpin = SpinTracker()
 
     init { sync() }
 
@@ -44,7 +48,7 @@ class Engine(
     }
 
     fun tick(now: Long = Clock.now()) {
-        tool.tick(actions, now)
+        tool.tick(actions, now)?.let(ui::hud)
         if (state == State.WHEEL && now - wheelLast > dismissAfterMs) {
             if (tools[index].sticky) commit() else cancel()
         }
@@ -56,6 +60,7 @@ class Engine(
         state = State.WHEEL
         index = tools.indexOf(tool).coerceAtLeast(0)
         wheelLast = Clock.now()
+        wheelSpin = SpinTracker()
         sync()
         ui.wheelOpen(tools, index)
     }
@@ -95,13 +100,20 @@ class Engine(
         when (ev.kind) {
             Kind.ROTATE -> {
                 val n = tools.size
-                index = ((index + ev.delta) % n + n) % n
+                index = ((index + wheelSteps(ev.delta)) % n + n) % n
                 actions.haptic()
                 ui.wheelMove(index, if (ev.delta > 0) 1 else -1)
             }
             Kind.CLICK -> commit()
             else -> cancel()            // double, triple, hold: close without change
         }
+    }
+
+    /** Careful clicks move one item; reports at the buds' max rate move [wheelAccel].
+     *  Turn-backs stay exact; no catch-up (overshooting a menu is worse). */
+    private fun wheelSteps(delta: Int): Int {
+        wheelSpin.update(delta, Clock.now())
+        return if (wheelAccel == 1 || wheelSpin.intensity < 0.75f) delta else delta * wheelAccel
     }
 
     private fun commit() {
@@ -148,7 +160,13 @@ sealed interface Gesture {
 }
 
 data class Hud(val icon: String, val title: String, val detail: String = "",
-               val progress: Float? = null, val direction: Int = 0)
+               val progress: Float? = null, val direction: Int = 0,
+               /** App switcher strip instead of the pill. */
+               val strip: AppStrip? = null)
+
+/** Recent apps with one highlighted. [commitInMs] > 0: it opens after that much quiet;
+ *  [opened]: it just opened (last frame before the strip leaves). */
+data class AppStrip(val apps: List<App>, val index: Int, val commitInMs: Long, val opened: Boolean = false)
 
 interface Ui {
     fun wheelOpen(items: List<Tool>, index: Int)
@@ -166,7 +184,8 @@ interface RotationControl {
 
 /** Everything a tool can do to the phone. Implemented by the accessibility service. */
 interface Actions {
-    fun scrollBy(px: Float)
+    /** One full swipe: +1 = finger up (next reel / further down the page), -1 = back. */
+    fun swipe(direction: Int)
     fun zoom(scale: Float): Float          // returns the applied scale
     fun zoomScale(): Float
     fun brightness(): Float?               // 0..1, null if not permitted

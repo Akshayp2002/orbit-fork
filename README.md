@@ -66,8 +66,9 @@ is greyed out: App info → ⋮ → Allow restricted settings) · 3. Notificatio
 press still plays/pauses your music app) · 4. Press-and-hold: tap, pick **Orbit →
 Always** · 5. Modify system settings (Brightness tool).
 
-Android tools: Volume, Brightness, Scroll (held virtual finger, no fling), Apps (turn
-through recent apps, press or pause to switch), Zoom (magnification), Torch, and
+Android tools: Volume, Brightness, Scroll (one flick per click: next / previous reel,
+Short or story; about a page in lists), Apps (a strip of recent-app icons: each click
+moves the highlight, let go of the dial ~0.9 s or press to open it), Zoom (magnification), Torch, and
 one-shot Screenshot and Claude. Known limits: the system volume panel flashes per click
 (the Bluetooth stack requests it); a hold is detected at most about once per 5 s.
 

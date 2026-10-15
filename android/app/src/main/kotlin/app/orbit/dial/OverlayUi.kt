@@ -8,6 +8,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -31,12 +33,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -45,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.min
@@ -171,9 +176,78 @@ fun HudOverlay(s: OverlayState) {
         if (d != 0) { nudge.snapTo(d * 16f); nudge.animateTo(0f, spring(0.3f, Spring.StiffnessMedium)) }
     }
     if (h == null || a <= 0.001f) { Box(Modifier.size(1.dp)); return }
+    h.strip?.let { strip ->
+        Box(Modifier.padding(horizontal = 20.dp, vertical = 28.dp)) { AppStripPanel(strip, h.title, a, lift, s.hudSeq) }
+        return
+    }
     // padding inside the window: room for the slide-in offset and the shadow, which
     // would otherwise be clipped by the WRAP_CONTENT window bounds
     Box(Modifier.padding(horizontal = 20.dp, vertical = 28.dp)) { HudPill(h, a, lift, nudge.value) }
+}
+
+private const val SLOT_DP = 58
+private const val VISIBLE_SLOTS = 5
+
+/** App switcher: recent apps in a row, the highlighted one centred and lifted, its
+ *  name below, and a bar that fills until it opens (restarts with every click). */
+@Composable
+private fun AppStripPanel(strip: app.orbit.dial.core.AppStrip, title: String, a: Float, lift: Float, seq: Int) {
+    val ctx = LocalContext.current
+    val icons = remember(strip.apps) {
+        strip.apps.associate { app ->
+            app.pkg to runCatching {
+                ctx.packageManager.getApplicationIcon(app.pkg).toBitmap(96, 96).asImageBitmap()
+            }.getOrNull()
+        }
+    }
+    val pos by animateFloatAsState(strip.index.toFloat(), spring(0.75f, Spring.StiffnessMediumLow), label = "stripPos")
+    val countdown = remember { Animatable(0f) }
+    val pulse = remember { Animatable(1f) }
+    LaunchedEffect(seq) {
+        if (strip.opened) {
+            countdown.snapTo(1f)
+            pulse.animateTo(1.18f, tween(110)); pulse.animateTo(1f, tween(170))
+        } else {
+            countdown.snapTo(0f)
+            countdown.animateTo(1f, tween(strip.commitInMs.toInt(), easing = androidx.compose.animation.core.LinearEasing))
+        }
+    }
+    val slot = SLOT_DP.dp
+    Column(
+        Modifier.graphicsLayer { alpha = a; translationY = lift * density }
+            .shadow(14.dp, RoundedCornerShape(26.dp)).background(Glass, RoundedCornerShape(26.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(26.dp))
+            .padding(top = 14.dp, bottom = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.width(slot * VISIBLE_SLOTS).height(64.dp).clipToBounds()) {
+            strip.apps.forEachIndexed { i, app ->
+                val off = i - pos                                   // slots from the centre
+                val near = (1f - kotlin.math.abs(off) / 2.6f).coerceIn(0f, 1f)
+                val selected = i == strip.index
+                Box(
+                    Modifier.offset { IntOffset(((VISIBLE_SLOTS / 2 + off) * SLOT_DP).dp.roundToPx(), 0) }
+                        .size(slot, 64.dp)
+                        .graphicsLayer {
+                            val sc = (0.78f + 0.3f * near) * if (selected) pulse.value else 1f
+                            scaleX = sc; scaleY = sc; alpha = 0.25f + 0.75f * near
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (selected) Box(Modifier.size(54.dp).border(2.dp, Accent, RoundedCornerShape(16.dp)))
+                    val img = icons[app.pkg]
+                    if (img != null) Image(img, app.label, Modifier.size(44.dp))
+                    else Icon(painterResource(orbitIcon("app")), app.label, Modifier.size(28.dp), tint = Ink)
+                }
+            }
+        }
+        Spacer(Modifier.size(6.dp))
+        Text(title, color = Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.size(8.dp))
+        Box(Modifier.size(96.dp, 3.dp).background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(2.dp))) {
+            Box(Modifier.fillMaxHeight().width(96.dp * countdown.value).background(Accent, RoundedCornerShape(2.dp)))
+        }
+    }
 }
 
 @Composable

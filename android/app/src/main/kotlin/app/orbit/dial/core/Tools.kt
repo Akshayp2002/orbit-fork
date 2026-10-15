@@ -9,7 +9,8 @@ abstract class Tool(val id: String, val label: String, val icon: String) {
     open val rotationPassthrough = false
     open fun enter(a: Actions) {}
     open fun leave(a: Actions) {}
-    open fun tick(a: Actions, now: Long) {}
+    /** Every ~50 ms; a returned Hud is shown. */
+    open fun tick(a: Actions, now: Long): Hud? = null
     open fun rotate(a: Actions, delta: Int): Hud? = null
     /** Return true when the tool handled the gesture itself. */
     open fun gesture(a: Actions, kind: Kind): Boolean = false
@@ -28,18 +29,13 @@ class VolumeTool : Tool("volume", "Volume", "volume") {
         if (kind == Kind.TRIPLE) { a.media("next"); true } else false
 }
 
-/** Each click scrolls; a fast spin goes up to maxGain times further (see SpinTracker). */
-class ScrollTool(private val pxPerClick: Float = 220f, private val maxGain: Float = 6f) :
-    Tool("scroll", "Scroll", "scroll") {
-    val spin = SpinTracker()
+/** Each click is one full swipe, like a thumb flick: next / previous reel, short,
+ *  story; about a page in lists. The service queues them so they never overlap. */
+class ScrollTool : Tool("scroll", "Scroll", "scroll") {
     override fun rotate(a: Actions, delta: Int): Hud {
-        spin.update(delta)
-        val g = spin.gain(maxGain)
-        var px = delta * pxPerClick * g
-        if (spin.catchUp) px += (if (delta > 0) 1 else -1) * pxPerClick * (g - 1)
-        a.scrollBy(px)
         val dir = if (delta > 0) 1 else -1
-        return Hud(icon, label, (if (dir > 0) "down" else "up") + if (spin.intensity > 0.5f) " · fast" else "", null, dir)
+        repeat(kotlin.math.abs(delta)) { a.swipe(dir) }
+        return Hud(icon, label, if (dir > 0) "next" else "previous", null, dir)
     }
 }
 
@@ -88,26 +84,43 @@ class TorchTool : Tool("torch", "Torch", "bolt") {
     override fun hud(a: Actions, direction: Int) = Hud(icon, label, if (on) "on" else "off", if (on) level else 0f, direction)
 }
 
-/** Rotate walks the recent apps (shown in the HUD); press or a pause switches. */
-class AppsTool(private val commitAfterMs: Long = 1100) : Tool("apps", "Apps", "app") {
+/** App switcher: the first click shows a strip of recent apps with the previous one
+ *  highlighted; each click moves the highlight; letting go of the dial for
+ *  [commitAfterMs] (or a press) opens it. */
+class AppsTool(private val commitAfterMs: Long = 900) : Tool("apps", "Apps", "app") {
     private var list: List<App> = emptyList()
     private var pos = 0
-    private var browsing = false
+    var browsing = false
+        private set
     private var last = 0L
+    private var justOpened: Hud? = null
     override fun rotate(a: Actions, delta: Int): Hud {
-        if (!browsing) { list = a.recentApps(); pos = 0; browsing = true }
-        if (list.isEmpty()) { browsing = false; return Hud(icon, label, "no recent apps yet") }
+        if (!browsing) {
+            list = a.recentApps().take(8)
+            if (list.isEmpty()) return Hud(icon, label, "no recent apps yet")
+            pos = -1                                  // first click forward = the previous app
+            browsing = true
+        }
         pos = ((pos + delta) % list.size + list.size) % list.size
         last = Clock.now()
-        return Hud(icon, list[pos].label, "${pos + 1}/${list.size}", (pos + 1f) / list.size, if (delta > 0) 1 else -1)
+        a.haptic()
+        return Hud(icon, list[pos].label, direction = if (delta > 0) 1 else -1,
+                   strip = AppStrip(list, pos, commitAfterMs))
     }
-    private fun commit(a: Actions) {
-        if (browsing && list.isNotEmpty()) a.openApp(list[pos].pkg)
+    private fun commit(a: Actions): Hud? {
+        if (!browsing) return null
         browsing = false
+        val app = list[pos]
+        a.openApp(app.pkg)
+        return Hud(icon, app.label, strip = AppStrip(list, pos, 0, opened = true)).also { justOpened = it }
     }
     override fun gesture(a: Actions, kind: Kind): Boolean =
         if (kind == Kind.CLICK && browsing) { commit(a); true } else false
-    override fun tick(a: Actions, now: Long) { if (browsing && now - last > commitAfterMs) commit(a) }
+    /** Right after a press opened the app, the engine asks for the HUD: show the strip's exit. */
+    override fun hud(a: Actions, direction: Int): Hud =
+        justOpened?.also { justOpened = null } ?: super.hud(a, direction)
+    override fun tick(a: Actions, now: Long): Hud? =
+        if (browsing && now - last > commitAfterMs) commit(a)?.also { justOpened = null } else null
     override fun leave(a: Actions) { browsing = false }
 }
 

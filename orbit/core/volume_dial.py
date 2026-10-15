@@ -5,16 +5,23 @@ nudges the buds' volume one step and the OS reports the new level. A platform
 backend feeds every level change here; this class decides how many clicks it
 was, and puts the level back when the active tool doesn't want volume to move.
 
-What the real-device traces taught us (Windows, Oct 2026):
+What the real-device traces taught us (Windows, Oct 2026; tools/dial_record.py):
 
-  * The step size isn't fixed (1/16 one session, 1/15 the next), so it is
-    learned, and any change of at least CLICK_MIN of a step counts as a click.
-    A reverse click right after a recenter must never round away to zero.
-  * After we set the level ourselves the buds can still sit on their old level:
-    they re-send it (stale echo) or report a click relative to it. Until they
-    confirm ours, reports are measured from their old level, and ours is re-sent.
-  * Recenter targets sit on the buds' own grid so the next click is a clean step.
-  * The buds report at most ~3 times a second and may fold two clicks into one.
+  * The buds keep their own N-step grid (16: raw AVRCP 0, 8, 16 ... 64, 71, 79 ...
+    of 127; one older session looked like 15) and the OS level is raw/127. Every
+    report is exactly one grid step. The grid is detected from the levels seen:
+    the smallest N that all recent reports sit on.
+  * A level we set between grid points is rounded by the buds; the next click is
+    +-1 from that. We only ever set grid points, so clicks stay whole steps.
+  * The buds send at most one step every ~0.3 s and DROP the clicks in between
+    (a 10-click spin arrives as 3 reports). Nothing here can recover them; the
+    tools scale fast report streams instead (orbit.core.motion).
+  * Every set of ours is followed ~1 ms later by a second, not-ours copy of the
+    same level (Windows). That is an echo, never a click and never proof the buds
+    took our level.
+  * A click can be in flight while we set: it then arrives measured from the
+    buds' old level. While a set is fresh, a report is measured from whichever of
+    (our level, their old level) makes it a whole step.
 
 Backend contract:
     get_level() -> float | None        current level 0..1
@@ -27,6 +34,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from typing import Callable, Protocol
 
 from orbit.core.events import InputEvent, Kind
@@ -34,9 +42,12 @@ from orbit.core.events import InputEvent, Kind
 log = logging.getLogger("orbit.dial")
 trace = logging.getLogger("orbit.trace")
 
-DEFAULT_STEP = 1 / 16       # first guess; learned from real clicks
+DEFAULT_GRID = 16           # CMF Buds Pro 2; re-detected from the levels the buds report
+GRID_RANGE = range(8, 33)
+GRID_FIT = 0.15             # max mean distance (in steps) from a grid point for "on grid"
+GRID_SAMPLES = 8
 CLICK_MIN = 0.35            # fraction of a step that counts as a click (2% keyboard nudges don't)
-MAX_CLICKS = 3              # the buds fold at most ~2 clicks into one report
+MAX_CLICKS = 2              # one step per report; 2 only if the OS skipped a callback
 RECENTER_IDLE_S = 0.9       # quiet time before we restore the level
 EDGE_STEPS = 2              # recenter at once when this close to either end
 STALE_S = 0.8               # window after our own set in which the buds may lag behind
@@ -59,15 +70,15 @@ class VolumeDial:
         self._passthrough = True
         self._level: float | None = None       # last level seen
         self._from_dial = False                # was that a dial report (vs our set)?
-        self.step = DEFAULT_STEP
+        self.grid = DEFAULT_GRID
+        self._seen: deque[float] = deque(maxlen=GRID_SAMPLES)   # recent dial-reported levels
         self._home: float | None = None
         self._last_move = 0.0
         self._last_dial = 0.0
         self._need_recenter = False
         self._saved: float | None = None       # real listening level while ducked
         self._apply: float | None = None       # level the worker should set
-        self._reapply: float | None = None     # same, forced, after the buds lagged
-        self._last_set = (0.0, None, None, 0)  # (time, buds' level before, our level, re-sends left)
+        self._last_set = (0.0, None, None)     # (time, buds' level before, our level)
 
     # ---------------------------------------------------------------- lifecycle
     def start(self):
@@ -85,7 +96,8 @@ class VolumeDial:
         with self._lock:
             self._level = self.backend.get_level()
             self._from_dial = False
-            self._last_set = (0.0, None, None, 0)
+            self._last_set = (0.0, None, None)
+            self._seen.clear()
 
     # ---------------------------------------------------------------- engine-facing
     def set_passthrough(self, on: bool):
@@ -117,6 +129,10 @@ class VolumeDial:
                 self._saved = None
         self._wake.set()
 
+    @property
+    def step(self) -> float:
+        return 1 / self.grid
+
     def level(self) -> float | None:
         return self._saved if self._saved is not None else self._level
 
@@ -139,34 +155,40 @@ class VolumeDial:
                 self._level = level
                 return
             step = self.step
-            d = level - prev
 
-            t_set, before, target, retries = self._last_set
-            if before is not None and now - t_set < STALE_S:
-                if abs(level - target) < CLICK_MIN * step:
-                    self._last_set = (t_set, None, target, 0)          # buds took our level
-                else:
-                    d = level - before                                 # still on their old level
-                    self._last_set = (t_set, level, target, max(retries - 1, 0))
-                    if retries > 0:
-                        self._reapply = target
-                        self._wake.set()
-                    if abs(d) < CLICK_MIN * step:
-                        trace.debug("     stale echo ignored, re-sending %.1f", target * 100)
-                        return
+            t_set, before, target = self._last_set
+            fresh = target is not None and now - t_set < STALE_S
+            if fresh and abs(level - target) < CLICK_MIN * step:
+                trace.debug("     echo of our level")                # never a click, keep the window
+                self._level = level
+                return
+            d = level - prev
+            if fresh:
+                # Landing back on their old level is a click from ours (we recentered
+                # one step, they clicked the same way), not a stale re-send: the buds
+                # confirmed all 25 recenters in the calibration capture.
+                # A click is measured from our level, or (still in flight when we set)
+                # from theirs - whichever makes it a whole step.
+                if before is not None and (abs(abs(level - before) / step - 1)
+                                           < abs(abs(d) / step - 1) - 0.25):
                     trace.debug("     click before buds took our level: measured from %.1f", before * 100)
+                    d = level - before
+                    # Windows then re-applies our level: keep treating it as an echo
+                    self._last_set = (t_set, None, target)
+                else:
+                    self._last_set = (t_set, None, None)        # buds moved on from ours
 
             self._level = level
             if abs(d) < CLICK_MIN * step:
                 self._from_dial = True
-                return                                                 # echo of ours, or a keyboard nudge
+                return                                                 # keyboard nudge
+            self._learn_grid(level)
+            step = self.step
 
-            # floor(+0.3), not round: one click from an off-grid level (1.67 steps) stays 1,
-            # a folded double (2.1 steps) stays 2. Capped so a glitch never becomes a burst.
+            # floor(+0.3), not round: one click from an off-grid level (1.6 steps) stays 1.
+            # Capped so a glitch never becomes a burst.
             clicks = min(MAX_CLICKS, max(1, int(abs(d) / step + 0.3)))
             delta = clicks if d > 0 else -clicks
-            if self._from_dial and clicks == 1 and 0.03 < abs(d) < 0.15:
-                self.step = 0.5 * step + 0.5 * abs(d)
             self._from_dial = True
 
             self._last_move = self._last_dial = now
@@ -181,7 +203,24 @@ class VolumeDial:
 
     # ---------------------------------------------------------------- internals
     def _grid(self) -> int:
-        return max(round(1 / self.step), 2 * EDGE_STEPS + 3)
+        return max(self.grid, 2 * EDGE_STEPS + 3)
+
+    def _learn_grid(self, level: float):
+        """Smallest grid every recent dial report sits on (16 for the CMF buds)."""
+        self._seen.append(level)
+        if len(self._seen) < 3:
+            return
+
+        def fit(n):
+            return sum(abs(v * n - round(v * n)) for v in self._seen) / len(self._seen)
+
+        if fit(self.grid) <= GRID_FIT:
+            return
+        for n in GRID_RANGE:
+            if fit(n) <= GRID_FIT:
+                log.info("dial grid: %d steps (was %d)", n, self.grid)
+                self.grid = n
+                return
 
     def _snap_home(self, lvl: float) -> float:
         """Nearest point on the buds' grid, EDGE_STEPS+1 clicks away from both ends."""
@@ -189,13 +228,12 @@ class VolumeDial:
         k = min(max(round(lvl * n), EDGE_STEPS + 1), n - EDGE_STEPS - 1)
         return k / n
 
-    def _set(self, level: float, why: str, force: bool = False):
+    def _set(self, level: float, why: str):
         with self._lock:
             before = self._level
-            if not force and before is not None and abs(before - level) < 1e-3:
+            if before is not None and abs(before - level) < 1e-3:
                 return
-            if not force:
-                self._last_set = (time.monotonic(), before, level, 2)
+            self._last_set = (time.monotonic(), before, level)
         trace.debug("set  %5.1f (%s)", level * 100, why)
         try:
             self.backend.set_level(level)
@@ -209,11 +247,8 @@ class VolumeDial:
         while True:
             with self._lock:
                 target, self._apply = self._apply, None
-                again, self._reapply = self._reapply, None
             if target is not None:
                 self._set(target, "duck/restore")
-            if again is not None:
-                self._set(again, "re-send after buds lagged", force=True)
             if self._stop.is_set():
                 break
             if self._need_recenter:

@@ -30,6 +30,7 @@ open_wheel_fallback = "triple"
 items = ["volume", "brightness", "switcher", "scroll", "zoom", "undo", "desktops", "tabs", "voice"]
 dismiss_after_ms = 5000
 duck_volume = 0.5           # audio drops to this fraction while the wheel is open (1 = off)
+accel = 1                   # 1 = one item per click. 2 = fast reports move 2 (can skip one on quick deliberate clicks)
 on_timeout = "select"       # "select": keep the highlighted tool; "cancel": keep the old one
 
 [ui]

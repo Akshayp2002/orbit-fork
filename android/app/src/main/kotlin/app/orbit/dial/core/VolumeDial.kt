@@ -9,11 +9,15 @@ import kotlin.math.roundToInt
  * Turns an output-volume level stream into dial clicks. Kotlin port of
  * orbit/core/volume_dial.py — same rules, learned on the real buds:
  *
- *  - the click size isn't fixed (1/16 one session, 1/15 the next): it is learned,
- *    and any change of at least CLICK_MIN of a step is a click (never rounded to 0)
- *  - after we set the level ourselves the buds may still sit on their old level:
- *    reports are measured from that old level until they take ours, ours is re-sent
- *  - recenter targets sit on the buds' own grid; at most MAX_CLICKS per report
+ *  - the buds keep their own N-step grid (16 on Windows; Android's stream index
+ *    has its own); every report is one step. The grid is detected: the smallest N
+ *    all recent reports sit on. Any change of at least CLICK_MIN of a step is a click.
+ *  - every set of ours may be echoed back as a not-ours report of the same level:
+ *    never a click
+ *  - a click in flight while we set arrives measured from the buds' old level; while
+ *    a set is fresh, a report is measured from whichever of (ours, theirs) makes it
+ *    a whole step. Landing back on their old level is a click from ours.
+ *  - recenter targets sit on the grid; at most MAX_CLICKS per report
  *
  * Levels are fractions 0..1 (Android: streamIndex / streamMax). The platform calls
  * [onLevel] for every change and [tick] every ~50 ms; [tick] performs any pending set.
@@ -22,6 +26,11 @@ class VolumeDial(
     private val backend: Backend,
     private val emit: (DialEvent) -> Unit,
     private val source: String = "volume-dial",
+    /** Android: levels are stream index / max, a grid of its own (15, 25...) that the
+     *  buds' 16 steps don't line up with, so one click can move 0-2 indices. Pass the
+     *  stream max: the grid is fixed to it and every report counts as one click
+     *  (the buds send exactly one step per report, calibration Oct 2026). */
+    private val streamSteps: Int? = null,
 ) {
     interface Backend {
         fun getLevel(): Float?
@@ -29,18 +38,21 @@ class VolumeDial(
     }
 
     companion object {
-        const val DEFAULT_STEP = 1f / 16
+        const val DEFAULT_GRID = 16
+        const val GRID_FIT = 0.15f
+        const val GRID_SAMPLES = 8
         const val CLICK_MIN = 0.35f
-        const val MAX_CLICKS = 3
+        const val MAX_CLICKS = 2
         const val RECENTER_IDLE_MS = 900L
         const val EDGE_STEPS = 2
         const val STALE_MS = 800L
     }
 
-    var step = DEFAULT_STEP
+    var grid = streamSteps ?: DEFAULT_GRID
         private set
+    val step: Float get() = 1f / grid
+    private val seen = ArrayDeque<Float>()     // recent dial-reported levels
     private var level: Float? = null
-    private var fromDial = false
     private var passthrough = true
     private var home: Float? = null
     private var lastMove = 0L
@@ -48,15 +60,13 @@ class VolumeDial(
     private var needRecenter = false
     private var saved: Float? = null
     private var apply: Float? = null
-    private var reapply: Float? = null
-    // our most recent set: time, buds' level before it, our level, re-sends left
+    // our most recent set: time, buds' level before it, our level (null once the buds moved on)
     private var setAt = 0L
     private var setBefore: Float? = null
-    private var setTarget = 0f
-    private var setRetries = 0
+    private var setTarget: Float? = null
 
     @Synchronized fun rebase() {
-        level = backend.getLevel(); fromDial = false; setBefore = null
+        level = backend.getLevel(); setBefore = null; setTarget = null; seen.clear()
     }
 
     @Synchronized fun setPassthrough(on: Boolean) {
@@ -85,26 +95,26 @@ class VolumeDial(
     fun onLevel(newLevel: Float, ours: Boolean, now: Long = Clock.now()) {
         var out: DialEvent? = null
         synchronized(this) {
-            if (ours) { level = newLevel; fromDial = false; return }
+            if (ours) { level = newLevel; return }
             val prev = level ?: run { level = newLevel; return }
+            val target = setTarget
+            val fresh = target != null && now - setAt < STALE_MS
+            if (fresh && abs(newLevel - target!!) < CLICK_MIN * step) { level = newLevel; return }   // echo
             var d = newLevel - prev
-            val before = setBefore
-            if (before != null && now - setAt < STALE_MS) {
-                if (abs(newLevel - setTarget) < CLICK_MIN * step) {
-                    setBefore = null                                   // buds took our level
+            if (fresh) {
+                val before = setBefore
+                if (before != null && abs(abs(newLevel - before) / step - 1) < abs(abs(d) / step - 1) - 0.25f) {
+                    d = newLevel - before          // click was in flight: measured from their old level
+                    setBefore = null               // the OS re-applies ours next: still an echo
                 } else {
-                    d = newLevel - before                              // still on their old level
-                    setBefore = newLevel
-                    if (setRetries > 0) { reapply = setTarget; setRetries-- }
-                    if (abs(d) < CLICK_MIN * step) return              // stale echo
+                    setBefore = null; setTarget = null
                 }
             }
             level = newLevel
-            if (abs(d) < CLICK_MIN * step) { fromDial = true; return }
-            // floor(+0.3): one click from an off-grid level stays 1, a folded double stays 2
-            val clicks = min(MAX_CLICKS, max(1, (abs(d) / step + 0.3f).toInt()))
-            if (fromDial && clicks == 1 && abs(d) > 0.03f && abs(d) < 0.15f) step = 0.5f * step + 0.5f * abs(d)
-            fromDial = true
+            if (abs(d) < CLICK_MIN * step) return                      // keyboard nudge
+            if (streamSteps == null) learnGrid(newLevel)
+            // floor(+0.3): one click from an off-grid level stays 1
+            val clicks = if (streamSteps != null) 1 else min(MAX_CLICKS, max(1, (abs(d) / step + 0.3f).toInt()))
             lastMove = now; lastDial = now
             if (!passthrough) {
                 val k = (newLevel * grid()).roundToInt()
@@ -116,14 +126,12 @@ class VolumeDial(
         out?.let(emit)
     }
 
-    /** Call every ~50 ms. Performs duck/restore, re-sends, and the idle recenter. */
+    /** Call every ~50 ms. Performs duck/restore and the idle recenter. */
     fun tick(now: Long = Clock.now()) {
         var target: Float? = null
-        var force = false
         synchronized(this) {
             when {
                 apply != null -> { target = apply; apply = null }
-                reapply != null -> { target = reapply; reapply = null; force = true }
                 needRecenter && now - lastMove >= RECENTER_IDLE_MS -> {
                     needRecenter = false
                     if (!passthrough) target = home
@@ -131,13 +139,23 @@ class VolumeDial(
             }
             val t = target ?: return
             val before = level
-            if (!force && before != null && abs(before - t) < 1e-3f) return
-            if (!force) { setAt = now; setBefore = before; setTarget = t; setRetries = 2 }
+            if (before != null && abs(before - t) < 1e-3f) return
+            setAt = now; setBefore = before; setTarget = t
         }
         backend.setLevel(target!!)
     }
 
-    private fun grid(): Int = max((1f / step).roundToInt(), 2 * EDGE_STEPS + 3)
+    private fun grid(): Int = max(grid, 2 * EDGE_STEPS + 3)
+
+    /** Smallest grid every recent dial report sits on. */
+    private fun learnGrid(l: Float) {
+        seen.addLast(l)
+        if (seen.size > GRID_SAMPLES) seen.removeFirst()
+        if (seen.size < 3) return
+        fun fit(n: Int) = seen.sumOf { abs(it * n - (it * n).roundToInt()).toDouble() } / seen.size
+        if (fit(grid) <= GRID_FIT) return
+        (8..32).firstOrNull { fit(it) <= GRID_FIT }?.let { grid = it }
+    }
 
     internal fun snapHome(l: Float): Float {
         val n = grid()

@@ -11,12 +11,14 @@ class EngineTest {
     private var passthrough: Boolean? = null
     private val duck = mutableListOf<Float?>()
 
+    private val huds = mutableListOf<Hud>()
+
     @Before fun clock() { Clock.now = { now } }
 
     private val actions = object : Actions {
         var bright = 0.5f
         var scale = 1f
-        override fun scrollBy(px: Float) { log += "scroll:${px.toInt()}" }
+        override fun swipe(direction: Int) { log += "swipe:$direction" }
         override fun zoom(scale: Float): Float { this.scale = scale; log += "zoom:$scale"; return scale }
         override fun zoomScale() = scale
         override fun brightness() = bright
@@ -36,7 +38,7 @@ class EngineTest {
         override fun wheelMove(index: Int, direction: Int) { log += "ui:move:$index" }
         override fun wheelCommit(index: Int) { log += "ui:commit:$index" }
         override fun wheelCancel() { log += "ui:cancel" }
-        override fun hud(h: Hud) {}
+        override fun hud(h: Hud) { huds += h }
     }
     private val rot = object : RotationControl {
         override fun setPassthrough(on: Boolean) { passthrough = on }
@@ -60,7 +62,29 @@ class EngineTest {
         e.ev(Kind.CLICK)
         assertEquals("scroll", e.tool.id); assertEquals(null, duck.last()); assertEquals(false, passthrough)
         e.ev(Kind.ROTATE, 1)
-        assertTrue(log.any { it.startsWith("scroll:") })
+        assertTrue(log.any { it.startsWith("swipe:") })
+    }
+
+    @Test fun wheelMovesFurtherOnFastReportsWhenAccelIsOn() {
+        val e = Engine(actions, ui, rot, defaultTools(), wheelAccel = 2)
+        e.ev(Kind.DOUBLE)
+        val n = e.tools.size
+        val moved = mutableListOf<Int>()
+        for ((d, gap) in listOf(1 to 1500L, 1 to 1500L, 1 to 350L, 1 to 350L, -1 to 350L, -1 to 1500L)) {
+            val before = e.index
+            now += gap - 400            // ev() adds 400
+            e.ev(Kind.ROTATE, d)
+            moved += ((e.index - before + n + 4) % n) - 4
+        }
+        assertEquals(listOf(1, 1, 2, 2, -1, -1), moved)
+    }
+
+    @Test fun wheelIsOneItemPerClickByDefault() {
+        val e = engine()
+        e.ev(Kind.DOUBLE)
+        val start = e.index
+        repeat(3) { now += 50; e.ev(Kind.ROTATE, 1) }     // 0.45 s apart
+        assertEquals((start + 3) % e.tools.size, e.index)
     }
 
     @Test fun doubleClosesWithoutChange() {
@@ -106,21 +130,35 @@ class EngineTest {
         assertEquals("volume", e.tool.id)
     }
 
-    @Test fun appsToolCyclesAndCommitsOnPause() {
+    @Test fun appsFirstClickHighlightsThePreviousAppAndPauseOpensIt() {
         val e = engine()
         e.setTool("apps")
         e.ev(Kind.ROTATE, 1)
+        val strip = huds.last().strip!!
+        assertEquals(0, strip.index); assertTrue(strip.commitInMs > 0)
+        e.tick(now + 300)
+        assertTrue(log.none { it.startsWith("open:") })           // still browsing
         e.tick(now + 2000)
-        assertTrue("open:b.two" in log)
+        assertTrue("open:a.one" in log)
+        assertTrue(huds.last().strip!!.opened)
     }
 
-    @Test fun flickScrollsMuchFurtherThanSlowClicks() {
-        val slow = ScrollTool(); val fast = ScrollTool()
-        var s = 0f; var f = 0f
-        val a = object : Actions by actions { override fun scrollBy(px: Float) { s += px } }
-        val b = object : Actions by actions { override fun scrollBy(px: Float) { f += px } }
-        for (i in 0 until 3) { now += 800; Clock.now = { now }; slow.rotate(a, 1) }
-        for (i in 0 until 3) { now += 340; Clock.now = { now }; fast.rotate(b, 1) }
-        assertTrue("fast=$f slow=$s", f > s * 3)
+    @Test fun appsEachClickMovesOnePressOpensAtOnce() {
+        val e = engine()
+        e.setTool("apps")
+        e.ev(Kind.ROTATE, 1); e.ev(Kind.ROTATE, 1)
+        assertEquals(1, huds.last().strip!!.index)
+        e.ev(Kind.CLICK)
+        assertEquals(listOf("open:b.two"), log.filter { it.startsWith("open:") })
+        assertTrue(huds.last().strip!!.opened)
+        e.tick(now + 2000)
+        assertEquals(1, log.count { it.startsWith("open:") })     // no second open
+    }
+
+    @Test fun scrollIsOneSwipePerClick() {
+        val e = engine()
+        e.setTool("scroll")
+        e.ev(Kind.ROTATE, 1); e.ev(Kind.ROTATE, 1); e.ev(Kind.ROTATE, -1)
+        assertEquals(listOf("swipe:1", "swipe:1", "swipe:-1"), log.filter { it.startsWith("swipe:") })
     }
 }

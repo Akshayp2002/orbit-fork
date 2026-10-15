@@ -30,8 +30,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlin.math.abs
-import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
@@ -40,6 +38,12 @@ import kotlin.math.sqrt
  * action: scroll gestures, magnification, global actions, app launches.
  */
 class OrbitAccessibilityService : AccessibilityService(), Actions {
+    companion object {
+        const val SWIPE_MS = 130L
+        const val SWIPE_GAP_MS = 140L
+        const val MAX_QUEUED_SWIPES = 3
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var overlay: OverlayController
@@ -109,50 +113,31 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
     }
 
     // ================================================================ Actions
-    // ---- scroll: one continuous virtual finger; each click pushes it further, it lifts when idle
-    private var stroke: GestureDescription.StrokeDescription? = null
-    private var fingerY = 0f
-    private val pending = ArrayDeque<Float>()
-    private var dispatching = false
-    private val lift = Runnable { endStroke() }
+    // ---- swipe: one quick thumb flick per click, queued so flicks never overlap.
+    // Reels / Shorts / TikTok need ~25% of the screen at flick speed to page; this
+    // travels 40% in 130 ms. A short gap between flicks lets the pager settle.
+    private val swipes = ArrayDeque<Int>()
+    private var swiping = false
 
-    override fun scrollBy(px: Float) {
-        pending.addLast(px)
-        main.removeCallbacks(lift)
-        main.postDelayed(lift, 420)
-        if (!dispatching) nextSegment()
+    override fun swipe(direction: Int) {
+        if (swipes.size < MAX_QUEUED_SWIPES) swipes.addLast(direction)
+        if (!swiping) nextSwipe()
     }
 
-    private fun nextSegment() {
-        val px = pending.removeFirstOrNull() ?: run { dispatching = false; return }
-        dispatching = true
+    private fun nextSwipe() {
+        val dir = swipes.removeFirstOrNull() ?: run { swiping = false; return }
+        swiping = true
         val dm = resources.displayMetrics
         val x = dm.widthPixels / 2f
-        val top = dm.heightPixels * 0.2f
-        val bottom = dm.heightPixels * 0.8f
-        var from = if (stroke == null) (if (px > 0) bottom else top).also { fingerY = it } else fingerY
-        var to = (from - px).coerceIn(top, bottom)              // scroll down = finger moves up
-        if (abs(to - from) < 2f) {                               // ran out of room: lift, start over
-            endStroke(); from = if (px > 0) bottom else top; fingerY = from
-            to = (from - px).coerceIn(top, bottom)
+        val low = dm.heightPixels * 0.70f
+        val high = dm.heightPixels * 0.30f
+        val path = Path().apply { if (dir > 0) { moveTo(x, low); lineTo(x, high) } else { moveTo(x, high); lineTo(x, low) } }
+        val done = object : GestureResultCallback() {
+            override fun onCompleted(g: GestureDescription?) { main.postDelayed({ nextSwipe() }, SWIPE_GAP_MS) }
+            override fun onCancelled(g: GestureDescription?) { main.postDelayed({ nextSwipe() }, SWIPE_GAP_MS) }
         }
-        val path = Path().apply { moveTo(x, from); lineTo(x, to) }
-        val dur = (abs(to - from) / 2.2f).toLong().coerceIn(40, 300)   // slow enough not to fling
-        val s = stroke?.continueStroke(path, 0, dur, true) ?: GestureDescription.StrokeDescription(path, 0, dur, true)
-        stroke = s; fingerY = to
-        val ok = dispatchGesture(GestureDescription.Builder().addStroke(s).build(), object : GestureResultCallback() {
-            override fun onCompleted(g: GestureDescription?) { nextSegment() }
-            override fun onCancelled(g: GestureDescription?) { stroke = null; nextSegment() }
-        }, main)
-        if (!ok) { stroke = null; dispatching = false }
-    }
-
-    private fun endStroke() {
-        val s = stroke ?: return
-        stroke = null
-        if (dispatching) return                                  // the queue will lift on its own
-        val p = Path().apply { moveTo(resources.displayMetrics.widthPixels / 2f, fingerY); lineTo(resources.displayMetrics.widthPixels / 2f, fingerY + 1) }
-        dispatchGesture(GestureDescription.Builder().addStroke(s.continueStroke(p, 0, 120, false)).build(), null, main)
+        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, SWIPE_MS)).build()
+        if (!dispatchGesture(gesture, done, main)) { swipes.clear(); swiping = false }
     }
 
     // ---- zoom

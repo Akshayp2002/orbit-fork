@@ -49,11 +49,23 @@ class VolumeDialTest {
         assertEquals(listOf(-1), got)
     }
 
-    @Test fun staleEchoAfterRecenterIsIgnored() {
-        val d = make(0.80f)
-        d.ourSet(56.25)
-        d.dial(80.0)
-        assertEquals(emptyList<Int>(), got)
+    private fun VolumeDial.report(u: Int, afterMs: Long = 20) { now += afterMs; onLevel(u / 127f, false, now) }
+
+    @Test fun clickLandingOnBudsOldLevelAfterRecenterCounts() {
+        val d = make(71 / 127f)
+        d.ourSet(64 / 127.0 * 100)
+        d.report(64, 1)            // the OS echoes our set
+        d.report(71, 200)          // user clicks up again: back on their old level
+        assertEquals(listOf(1), got)
+    }
+
+    @Test fun clickInFlightDuringRecenterIsOneStepNotPlus2Minus2() {
+        val d = make(95 / 127f)
+        d.ourSet(64 / 127.0 * 100)
+        d.report(64, 1)            // echo
+        d.report(87, 80)           // click measured from their old 95
+        d.report(64, 14)           // the OS re-applies ours
+        assertEquals(listOf(-1), got)
     }
 
     @Test fun clickBeforeBudsTakeRecenterCountsOnce() {
@@ -98,5 +110,17 @@ class VolumeDialTest {
         d.onLevel(sets.last(), true, now)
         d.setDuck(null); d.tick(now)
         assertEquals(0.60f, sets.last(), 1e-4f)
+    }
+
+    @Test fun streamIndexModeCountsEveryReportAsOneClick() {
+        // 25-step phone stream: the buds' 16 steps move it 1 or 2 indices per click
+        val d = VolumeDial(object : VolumeDial.Backend {
+            override fun getLevel() = 12 / 25f
+            override fun setLevel(level: Float) { sets += level }
+        }, { got += it.delta }, streamSteps = 25)
+        d.rebase(); d.setPassthrough(false); d.tick(now); sets.clear()
+        for (i in listOf(14, 15, 17, 15)) { now += 400; d.onLevel(i / 25f, false, now) }
+        assertEquals(listOf(1, 1, 1, -1), got)
+        assertEquals(25, d.grid)
     }
 }

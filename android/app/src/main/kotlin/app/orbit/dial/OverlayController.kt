@@ -117,7 +117,12 @@ class OverlayController(private val svc: AccessibilityService) : Ui {
         state.hudShown = true
         state.hudSeq++
         main.removeCallbacks(hideHud)
-        main.postDelayed(hideHud, 1400)
+        val strip = h.strip
+        main.postDelayed(hideHud, when {
+            strip == null -> 1400L
+            strip.opened -> 380L                      // let the "open" pulse play, then leave
+            else -> strip.commitInMs + 1500L          // browsing: the tool opens (and hides) first
+        })
     }.let {}
 }
 

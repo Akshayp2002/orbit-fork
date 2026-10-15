@@ -23,6 +23,7 @@ from typing import Protocol
 
 from orbit.core import actions, tools
 from orbit.core.events import Capability, InputEvent, Kind
+from orbit.core.motion import SpinTracker
 from orbit.core.tools import Hud, Tool
 from orbit.platform.base import InputSource, Output, RotationSource
 
@@ -70,6 +71,12 @@ class Engine:
         self.dismiss_after = cfg["wheel"].get("dismiss_after_ms", 6000) / 1000
         self.duck = float(cfg["wheel"].get("duck_volume", 0.5))   # 0 or 1 = off
         self.timeout_selects = cfg["wheel"].get("on_timeout", "select") == "select"
+        # The buds drop the clicks between reports when turned fast (10 clicks -> 3 reports),
+        # so a report at their max rate moves the highlight `accel` items instead of one.
+        # Off by default: two deliberate clicks ~0.45 s apart look the same as a spin with
+        # dropped clicks, and skipping an item when you meant one is worse than one more turn.
+        self.wheel_accel = max(1, int(cfg["wheel"].get("accel", 1)))
+        self._wheel_spin = SpinTracker()
         self.state = State.TOOL
         self.tool: Tool = self.tools[cfg.get("default_tool", self.wheel_ids[0])]
         self.prev_tool: Tool | None = None
@@ -115,6 +122,7 @@ class Engine:
         self.state = State.WHEEL
         self.index = self.wheel_ids.index(self.tool.id) if self.tool.id in self.wheel_ids else 0
         self._wheel_last = time.monotonic()
+        self._wheel_spin = SpinTracker()
         self._sync_passthrough()
         self.ui.wheel_open([self.tools[i].to_item() for i in self.wheel_ids], self.index)
 
@@ -177,12 +185,22 @@ class Engine:
         self._wheel_last = time.monotonic()
         if ev.kind == Kind.ROTATE:
             n = len(self.wheel_ids)
-            self.index = (self.index + ev.delta) % n
+            self.index = (self.index + self._wheel_steps(ev.delta)) % n
             self.ui.wheel_move(self.index, 1 if ev.delta > 0 else -1)
         elif ev.kind == Kind.CLICK:
             self._commit()
         elif ev.kind in (Kind.HOLD, Kind.DOUBLE, Kind.TRIPLE):
             self._cancel()
+
+    def _wheel_steps(self, delta: int) -> int:
+        """Careful clicks move one item; reports at the buds' max rate (<~0.47 s apart,
+        same direction) move `accel`. Turn-backs stay exact. No catch-up for the first
+        report of a flick: in a menu, overshooting is worse than one more click."""
+        spin = self._wheel_spin
+        spin.update(delta)
+        if self.wheel_accel == 1 or spin.intensity < 0.75:
+            return delta
+        return delta * self.wheel_accel
 
     def _commit(self) -> None:
         item = self.tools[self.wheel_ids[self.index]]

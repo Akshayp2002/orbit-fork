@@ -88,7 +88,8 @@ def test_double_opens_wheel_rotate_click_selects():
     assert e.tool.id == "scroll" and e.state == State.TOOL
     assert rot.passthrough is False          # scroll consumes rotation
     e.handle(ev(Kind.ROTATE, 1))
-    time.sleep(0.4)                          # smooth scroll delivers over a few frames`n    assert 0.8 < sum(n for k, n in out.log if k == "scroll") <= 1.2
+    time.sleep(0.4)                          # smooth scroll delivers over a few frames
+    assert 0.8 < sum(n for k, n in out.log if k == "scroll") <= 1.2
 
 
 def test_wheel_wraps_backwards():
@@ -208,3 +209,32 @@ def test_bad_config_rejected():
     cfg["tools"]["x"] = {"type": "keys", "rotate_cw": "teleport:mars"}
     with pytest.raises(ValueError):
         config_mod.validate(cfg)
+
+
+
+def test_wheel_moves_further_on_fast_reports_but_stays_exact_slow_and_on_turn_back(monkeypatch):
+    """Calibration: the buds drop clicks between reports when spun fast, so reports at
+    their max rate (~0.35 s apart) move 2 items; slow clicks and turn-backs move 1."""
+    import orbit.core.motion as motion
+    e, *_ = make()
+    e.wheel_accel = 2                      # opt-in (wheel.accel)
+    e.handle(ev(Kind.DOUBLE))
+    moved = []
+    for d, t in [(1, 100.0), (1, 101.5), (1, 101.85), (1, 102.2), (-1, 102.55), (-1, 104.0)]:
+        monkeypatch.setattr(motion.time, "monotonic", lambda t=t: t)
+        before = e.index
+        e.handle(ev(Kind.ROTATE, d))
+        moved.append((e.index - before + 4) % len(e.wheel_ids) - 4)
+    assert moved == [1, 1, 2, 2, -1, -1]
+
+
+def test_wheel_is_one_item_per_click_by_default(monkeypatch):
+    """Two controlled clicks ~0.45 s apart must not skip an item."""
+    import orbit.core.motion as motion
+    e, *_ = make()
+    e.handle(ev(Kind.DOUBLE))
+    start = e.index
+    for t in (100.0, 100.45, 100.8):
+        monkeypatch.setattr(motion.time, "monotonic", lambda t=t: t)
+        e.handle(ev(Kind.ROTATE, 1))
+    assert e.index == (start + 3) % len(e.wheel_ids)
