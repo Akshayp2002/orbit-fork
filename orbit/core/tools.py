@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from orbit.core import actions
 from orbit.core.actions import Action
-from orbit.core.motion import SpinTracker
+from orbit.core.motion import Pace, SpinTracker
 
 if TYPE_CHECKING:
     from orbit.core.engine import Engine
@@ -118,9 +118,6 @@ class SmoothScrollTool(Tool):
     """
     FRAME_S = 1 / 120
     MIN_UNITS = 8                    # smallest wheel delta sent (1 notch = 120 units)
-    FAST_GAP = 0.35                  # reports this close: turning faster than the buds report
-    SLOW_GAP = 0.90                  # this far apart: deliberate single clicks
-    SMOOTH = 0.35                    # how quickly the speed estimate follows the turning
 
     def __init__(self, tid, cfg):
         super().__init__(tid, cfg)
@@ -139,8 +136,7 @@ class SmoothScrollTool(Tool):
         self._out = None
         self._run = False
         self._gen = 0
-        self._t = 0.0
-        self.speed = 0.0        # 0 = careful clicks .. 1 = faster than the buds can report
+        self.pace = Pace()
 
     def enter(self, e):
         self._out = e.out
@@ -158,14 +154,8 @@ class SmoothScrollTool(Tool):
         if not self._run:
             self.enter(e)
         d = 1 if delta > 0 else -1
-        now = time.monotonic()
-        gap, self._t = now - self._t, now
-        raw = min(1.0, max(0.0, (self.SLOW_GAP - gap) / (self.SLOW_GAP - self.FAST_GAP)))
-        if d != self._dir:
-            self.speed = 0.0                 # a turn-back is a correction: exact
-        else:
-            self.speed += self.SMOOTH * (raw - self.speed)
-        g = 1 + (self.max_gain - 1) * self.speed ** 2
+        speed = self.pace.update(delta)
+        g = 1 + (self.max_gain - 1) * speed ** 2
         impulse = d * self.base * abs(delta) * g
         with self._lock:
             if d != self._dir:            # brake: kill everything going the other way
@@ -173,9 +163,9 @@ class SmoothScrollTool(Tool):
             self._dir = d
             self._pending += impulse
             # glide only builds with sustained speed
-            self._vel += impulse * self.speed ** 2 * self.momentum_k
+            self._vel += impulse * speed ** 2 * self.momentum_k
         detail = "down" if d > 0 else "up"
-        if self.speed > 0.5:
+        if speed > 0.5:
             detail += " · fast"
         return Hud(self.icon, self.label, detail, None, d)
 
@@ -197,6 +187,31 @@ class SmoothScrollTool(Tool):
                 self._carry = units - send
             if send and self._out:
                 self._out.scroll(send / 120, horizontal=self.horizontal)
+
+
+class ScrubTool(Tool):
+    """Video timeline (DaVinci Resolve, Premiere, Final Cut...): careful clicks step one
+    frame (fine keys), turning fast jumps (coarse keys, e.g. Shift+arrow = 1 s in
+    Resolve). Speed is the smoothed pace, so one quick click never jumps; turning back
+    is always a single frame."""
+
+    def __init__(self, tid, cfg):
+        super().__init__(tid, cfg)
+        self.fine_cw = actions.parse(cfg.get("fine_cw", "keys:right"))
+        self.fine_ccw = actions.parse(cfg.get("fine_ccw", "keys:left"))
+        self.coarse_cw = actions.parse(cfg.get("coarse_cw", "keys:shift+right"))
+        self.coarse_ccw = actions.parse(cfg.get("coarse_ccw", "keys:shift+left"))
+        self.coarse_at = float(cfg.get("coarse_at", 0.55))      # pace 0..1 where jumps begin
+        self.pace = Pace()
+
+    def rotate(self, e, delta):
+        coarse = self.pace.update(delta) >= self.coarse_at
+        fwd = delta > 0
+        a = (self.coarse_cw if fwd else self.coarse_ccw) if coarse else (self.fine_cw if fwd else self.fine_ccw)
+        for _ in range(abs(delta)):
+            a(e)
+        what = self.cfg.get("detail_coarse", "jump") if coarse else self.cfg.get("detail_fine", "frame")
+        return Hud(self.icon, self.label, f"{what} {'›' if fwd else '‹'}", None, 1 if fwd else -1)
 
 
 class BrightnessTool(Tool):
@@ -321,6 +336,7 @@ TOOL_TYPES: dict[str, type[Tool]] = {
     "brightness": BrightnessTool,
     "window_switcher": WindowSwitcherTool,
     "action": ActionItem,
+    "scrub": ScrubTool,
 }
 
 

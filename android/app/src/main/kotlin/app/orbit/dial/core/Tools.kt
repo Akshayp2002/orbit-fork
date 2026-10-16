@@ -49,6 +49,15 @@ class SlidesTool : Tool("slides", "Slides", "presentation") {
     }
 }
 
+/** Remote shutter: with the Camera tool picked, each press of the dial takes a photo
+ *  (opens the camera first if it isn't in front). Turning does nothing. */
+class CameraTool : Tool("camera", "Camera", "camera") {
+    override fun rotate(a: Actions, delta: Int) = Hud(icon, label, "press the dial to take a photo")
+    override fun gesture(a: Actions, kind: Kind): Boolean =
+        if (kind == Kind.CLICK) { a.shutter(); true } else false
+    override fun hud(a: Actions, direction: Int) = Hud(icon, label, "press = shutter", direction = direction)
+}
+
 class BrightnessTool(private val step: Float = 0.06f, private val maxGain: Float = 3f) :
     Tool("brightness", "Brightness", "brightness") {
     private val spin = SpinTracker()
@@ -148,6 +157,7 @@ fun defaultTools(): List<Tool> = listOf(
     AppsTool(),
     ZoomTool(),
     TorchTool(),
+    CameraTool(),
     ActionItem("screenshot", "Screenshot", "camera") { it.global("screenshot") },
     ActionItem("claude", "Claude", "claude") { it.launch("com.anthropic.claude") },
 )

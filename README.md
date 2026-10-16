@@ -36,7 +36,9 @@ python -m orbit              # asks for admin (only needed for press-and-hold)
 python -m orbit --no-elevate # everything except hold
 python -m orbit --dev        # also accept test events: python -m orbit.inject double
 ```
-Tray icon: Show wheel, Settings (wheel items on/off and order, start tool, what each press
+Desktop tools include Timeline (DaVinci Resolve / Premiere / Final Cut: careful clicks step a frame, fast turning jumps with Shift+arrow, press = play/pause), Slides (one slide per click, press = black screen) and Camera (press = shutter in the Windows Camera app / Photo Booth; off the wheel by default).
+
+Tray icon: Show wheel, Settings (scroll feel sliders, any gesture can "Open an app…" by name, wheel items on/off and order, start tool, what each press
 does, dark / light / match-system appearance, your Claude Quick Entry shortcut, and custom
 **Shortcuts**: wheel items that press a key combo when you pick them and press the dial;
 saved to `settings.json` next to your config and applied at once), Open config (your
@@ -74,7 +76,7 @@ is greyed out: App info → ⋮ → Allow restricted settings) · 3. Notificatio
 press still plays/pauses your music app) · 4. Press-and-hold: tap, pick **Orbit →
 Always** · 5. Modify system settings (Brightness tool).
 
-Android tools: Volume, Brightness, Scroll (one flick per click: next / previous reel,
+Android tools: Volume, Brightness, Slides (one sideways swipe per click), Camera (press the dial = shutter; opens the camera if needed), Scroll (one flick per click: next / previous reel,
 Short or story; about a page in lists), Apps (a strip of recent-app icons: each click
 moves the highlight, let go of the dial ~0.9 s or press to open it), Zoom (magnification), Torch, and
 one-shot Screenshot and Claude. Known limits: the system volume panel flashes per click

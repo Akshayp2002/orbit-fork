@@ -74,13 +74,12 @@ def test_speed_builds_gradually_and_ignores_one_quick_click():
     """Mac test gaps (s): normal turning varies 0.3-0.6 from click to click. The
     distance per click must change smoothly, not swing 2x <-> 8x."""
     tool = SmoothScrollTool("s", {})
-    tool._dir = 1
+    tool.pace._dir = tool._dir = 1
     gains = []
-    t0 = time.monotonic()
     for gap in (0.54, 0.43, 0.63, 0.30, 0.55, 0.45):
-        tool._t = time.monotonic() - gap
+        tool.pace._t = time.monotonic() - gap
         tool.rotate(_E(), 1)
-        gains.append(1 + (tool.max_gain - 1) * tool.speed ** 2)
+        gains.append(1 + (tool.max_gain - 1) * tool.pace.speed ** 2)
     tool.leave(_E())
     span = tool.max_gain - 1            # limits scale with the configured top speed
     steps = [abs(b - a) for a, b in zip(gains, gains[1:])]
@@ -141,3 +140,30 @@ def test_wheel_ducks_and_restores():
     e.handle(ev(Kind.DOUBLE))
     e.handle(ev(Kind.DOUBLE))            # cancel also restores
     assert rot.duck[-1] is None
+
+
+def test_scrub_steps_frames_when_careful_and_jumps_when_fast():
+    from orbit.core.tools import ScrubTool
+    t, e = ScrubTool("scrub", {}), _E()
+    now = [100.0]
+
+    def turn(d, gap):
+        now[0] += gap
+        t.pace._t = now[0] - gap
+        import orbit.core.motion as m
+        real = m.time.monotonic
+        m.time.monotonic = lambda: now[0]
+        try:
+            t.rotate(e, d)
+        finally:
+            m.time.monotonic = real
+
+    for _ in range(3):
+        turn(1, 0.8)                            # careful: one frame each
+    for _ in range(6):
+        turn(1, 0.3)                            # fast: becomes jumps once the pace builds
+    turn(-1, 0.3)                               # turn back: always one frame
+    keys = [c for k, c in e.out.log if k == "keys"]
+    assert keys[:3] == ["right"] * 3
+    assert "shift+right" in keys[3:9] and keys[3] == "right"      # no jump on the first quick click
+    assert keys[-1] == "left"

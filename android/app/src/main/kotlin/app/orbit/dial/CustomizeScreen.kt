@@ -49,6 +49,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -76,6 +78,7 @@ private val PRESETS = listOf(
     "Next track" to "media:next",
     "Previous track" to "media:previous",
     "Back to previous tool" to "last_tool",
+    "Open an app…" to OPEN_APP,
     "Open Claude" to "launch:com.anthropic.claude",
     "Screenshot" to "global:screenshot",
     "Home" to "global:home",
@@ -85,6 +88,7 @@ private val PRESETS = listOf(
     "Nothing" to "none",
 )
 private const val MAX_ITEMS = 12
+private const val OPEN_APP = "launch:"
 private val APPEARANCES = listOf("Match system" to "system", "Dark" to "dark", "Light" to "light")
 
 /** Wheel items (Yes/No + order), the tool to start with, and what each press does.
@@ -98,10 +102,26 @@ fun CustomizeScreen(onBack: () -> Unit) {
     var s by remember { mutableStateOf(SettingsStore.load(ctx)) }
     fun update(n: OrbitSettings) { s = n; SettingsStore.save(ctx, n) }
     val options = PRESETS + all.filter { it.sticky }.map { "Switch to ${it.label}" to "tool:${it.id}" }
-    fun nameOf(v: String) = options.firstOrNull { it.second == v }?.first ?: v
+    var pickingFor by remember { mutableStateOf<Kind?>(null) }
+    fun nameOf(v: String): String {
+        options.firstOrNull { it.second == v }?.let { return it.first }
+        if (v.startsWith(OPEN_APP)) {
+            val pkg = v.removePrefix(OPEN_APP)
+            val label = runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)) }
+                .getOrNull()?.toString() ?: pkg
+            return "Open $label"
+        }
+        return v
+    }
     val wheel = s.wheel(all)
     val opens = OrbitSettings.GESTURES.filter { s.gestures[it] == OrbitSettings.OPEN_WHEEL }
 
+    pickingFor?.let { k ->
+        AppPicker(onDismiss = { pickingFor = null }) { pkg ->
+            update(s.copy(gestures = s.gestures + (k to OPEN_APP + pkg)))
+            pickingFor = null
+        }
+    }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surface,
         topBar = {
@@ -173,8 +193,9 @@ fun CustomizeScreen(onBack: () -> Unit) {
                     OrbitSettings.GESTURES.forEach { k ->
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         val v = s.gestures.getValue(k)
-                        PickerRow({ Pips(k) }, GESTURE_NAMES.getValue(k), nameOf(v), options, v) {
-                            update(s.copy(gestures = s.gestures + (k to it)))
+                        PickerRow({ Pips(k) }, GESTURE_NAMES.getValue(k), nameOf(v), options,
+                            if (v.startsWith(OPEN_APP) && v != "launch:com.anthropic.claude") OPEN_APP else v) {
+                            if (it == OPEN_APP) pickingFor = k else update(s.copy(gestures = s.gestures + (k to it)))
                         }
                     }
                 }
@@ -334,4 +355,42 @@ private fun WheelPreview(items: List<Tool>, start: String, look: OverlayLook) {
             Text("${items.size} item${if (items.size == 1) "" else "s"}", color = look.inkDim, style = MaterialTheme.typography.labelMedium)
         }
     }
+}
+
+
+/** Every app with a launcher icon, A to Z. */
+@Composable
+private fun AppPicker(onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val apps = remember {
+        val pm = ctx.packageManager
+        pm.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN)
+            .addCategory(android.content.Intent.CATEGORY_LAUNCHER), 0)
+            .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
+            .filter { it.first != ctx.packageName }
+            .distinctBy { it.first }
+            .sortedBy { it.second.lowercase() }
+    }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Open which app?") },
+        text = {
+            LazyColumn(Modifier.height(420.dp)) {
+                items(apps.size) { i ->
+                    val (pkg, label) = apps[i]
+                    val icon = remember(pkg) {
+                        runCatching { ctx.packageManager.getApplicationIcon(pkg).toBitmap(72, 72).asImageBitmap() }.getOrNull()
+                    }
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { onPick(pkg) },
+                        leadingContent = { if (icon != null) androidx.compose.foundation.Image(icon, null, Modifier.size(32.dp)) },
+                        headlineContent = { Text(label) },
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onDismiss) { Text("Cancel") } },
+    )
 }

@@ -16,7 +16,7 @@ from PySide6.QtCore import (QEasingCurve, QPointF, QPropertyAnimation, QRectF, Q
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QGuiApplication, QIcon, QKeySequence, QPainter, QPen,
                            QPixmap, QRadialGradient)
 from PySide6.QtWidgets import (QAbstractButton, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QScrollArea, QToolButton, QVBoxLayout, QWidget)
+                               QScrollArea, QSlider, QToolButton, QVBoxLayout, QWidget)
 
 import uuid
 
@@ -42,8 +42,10 @@ PRESETS = [
     ("Next track", "media:next"),
     ("Previous track", "media:previous"),
     ("Back to previous tool", "last_tool"),
+    ("Open an app…", "launch:"),
     ("Nothing", "none"),
 ]
+OPEN_APP = "launch:"
 MAX_ITEMS = 12
 APPEARANCES = [("Match system", "system"), ("Dark", "dark"), ("Light", "light")]
 
@@ -424,6 +426,67 @@ class _ShortcutRow(QFrame):
         return {"id": self.sid, "label": self.label.text().strip() or "Shortcut", "keys": self.keys.combo()}
 
 
+class _SliderRow(QFrame):
+    """A labelled slider with its value shown (e.g. "3.5×")."""
+
+    def __init__(self, label: str, hint: str, lo: float, hi: float, step: float, value: float,
+                 fmt: Callable[[float], str], on_change: Callable[[], None]):
+        super().__init__()
+        self.setObjectName("row")
+        self.step, self.fmt = step, fmt
+        h = QHBoxLayout(self)
+        h.setContentsMargins(16, 10, 16, 10)
+        h.setSpacing(14)
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        lab = QLabel(label)
+        lab.setFont(_font(14, QFont.DemiBold))
+        col.addWidget(lab)
+        sub = QLabel(hint)
+        sub.setObjectName("meta")
+        col.addWidget(sub)
+        h.addLayout(col, 1)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(round(lo / step), round(hi / step))
+        self.slider.setValue(round(value / step))
+        self.slider.setFixedWidth(190)
+        self.slider.setCursor(Qt.PointingHandCursor)
+        h.addWidget(self.slider)
+        self.val = QLabel()
+        self.val.setObjectName("meta2")
+        self.val.setFixedWidth(56)
+        self.val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        h.addWidget(self.val)
+        self.slider.valueChanged.connect(lambda _: (self._sync(), on_change()))
+        self._sync()
+
+    def _sync(self):
+        self.val.setText(self.fmt(self.value()))
+
+    def value(self) -> float:
+        return round(self.slider.value() * self.step, 2)
+
+
+class _AppRow(QFrame):
+    """Shown under a gesture set to "Open an app…": which app."""
+
+    def __init__(self, name: str, on_change: Callable[[], None]):
+        super().__init__()
+        self.setObjectName("row")
+        h = QHBoxLayout(self)
+        h.setContentsMargins(56, 4, 10, 10)
+        h.setSpacing(12)
+        lab = QLabel("App to open")
+        lab.setObjectName("meta2")
+        h.addWidget(lab, 1)
+        self.edit = QLineEdit(name)
+        self.edit.setPlaceholderText("e.g. Spotify, DaVinci Resolve")
+        self.edit.setToolTip("The app's name as in the Start menu / Applications folder, or a path")
+        self.edit.setFixedWidth(250)
+        self.edit.textEdited.connect(lambda _: on_change())
+        h.addWidget(self.edit)
+
+
 # ---------------------------------------------------------------- window
 class SettingsWindow(QWidget):
     """`base_cfg`: config.toml merged for this platform, without settings.json.
@@ -569,16 +632,39 @@ class SettingsWindow(QWidget):
         lead.setFixedWidth(28)
         dial.box.addWidget(_ComboRow(lead, "Start with", self.start))
         self.gesture_boxes: dict[str, QComboBox] = {}
+        self.app_rows: dict[str, _AppRow] = {}
         for g in st.GESTURES:
-            box = self._gesture_box(g, st.gesture_action(base_cfg, g), st.gesture_action(merged, g))
-            box.currentIndexChanged.connect(lambda _: self.changed())
+            current = st.gesture_action(merged, g)
+            box = self._gesture_box(g, st.gesture_action(base_cfg, g), current)
             self.gesture_boxes[g] = box
             row = _ComboRow(GesturePips(g, INK2), GESTURE_NAMES[g], box)
             if g == "hold" and not has_hold:
                 row.setToolTip("macOS doesn't pass the hold to apps; on Windows it needs Orbit running as admin.")
             dial.box.addWidget(row)
+            app_name = current[len(OPEN_APP):] if isinstance(current, str) and current.startswith(OPEN_APP) else ""
+            self.app_rows[g] = _AppRow(app_name, lambda: self.changed())
+            dial.box.addWidget(self.app_rows[g])
+            box.currentIndexChanged.connect(lambda _: self.changed())
         dial.restyle()
         v.addWidget(dial)
+
+        v.addSpacing(34)
+        v.addWidget(self._heading("Scroll"))
+        v.addSpacing(4)
+        v.addWidget(self._help("How the Scroll tool feels on this computer. Apps scroll different distances "
+                               "per notch on Windows and macOS, so this is saved per computer."))
+        v.addSpacing(14)
+        scroll_grp = _Group()
+        sc_cfg = merged["tools"].get("scroll", {})
+        self.fast_scroll = _SliderRow("Fast-turn speed", "How much further a quick turn goes", 1.0, 8.0, 0.5,
+                                      float(sc_cfg.get("max_gain", 3.5)), lambda x: f"{x:g}×", lambda: self.changed())
+        self.click_scroll = _SliderRow("Distance per click", "One careful click, in mouse-wheel notches", 0.25, 3.0,
+                                       0.25, float(sc_cfg.get("notches_per_detent", 1.0)),
+                                       lambda x: f"{x:g} notch" + ("" if x == 1 else "es"), lambda: self.changed())
+        scroll_grp.box.addWidget(self.fast_scroll)
+        scroll_grp.box.addWidget(self.click_scroll)
+        scroll_grp.restyle()
+        v.addWidget(scroll_grp)
 
         v.addSpacing(34)
         v.addWidget(self._heading("Claude"))
@@ -680,6 +766,8 @@ class SettingsWindow(QWidget):
         for tid in self.order:
             if self.tools[tid].sticky:
                 box.addItem(_icon(self.tools[tid].icon, INK2), f"Switch to {self.tools[tid].label}", f"tool:{tid}")
+        if isinstance(current, str) and current.startswith(OPEN_APP):
+            current = OPEN_APP                     # the app's name lives in the row below
         if box.findData(current) < 0:
             box.insertItem(0, f"Custom: {_summary(current)}", current)
         box.setCurrentIndex(max(0, box.findData(current)))
@@ -747,12 +835,22 @@ class SettingsWindow(QWidget):
             "wheel": {"order": list(self.order), "enabled": enabled},
             "default_tool": self.start.currentData(),
             "appearance": self.appearance_box.currentData(),
-            "gestures": {g: b.currentData() for g, b in self.gesture_boxes.items() if b.isEnabled()},
+            "gestures": {g: self._gesture_value(g) for g, b in self.gesture_boxes.items() if b.isEnabled()},
+            "scroll": {"max_gain": self.fast_scroll.value(), "notches_per_detent": self.click_scroll.value()},
             "claude_shortcut": self.claude_keys.combo() or "ctrl+alt+v",
             "shortcuts": [r.value() for r in self.sc_rows.values()],
         }
 
+    def _gesture_value(self, g: str):
+        v = self.gesture_boxes[g].currentData()
+        if v == OPEN_APP:
+            name = self.app_rows[g].edit.text().strip()
+            return OPEN_APP + name if name else "none"
+        return v
+
     def changed(self):
+        for g, row in getattr(self, "app_rows", {}).items():
+            row.setVisible(self.gesture_boxes[g].currentData() == OPEN_APP)
         s = self.collect()
         on = s["wheel"]["enabled"]
         self.preview.set_items([(t, self.tools[t].label, self.tools[t].icon) for t in on], s["default_tool"])
@@ -771,6 +869,10 @@ class SettingsWindow(QWidget):
             problems.append(f"{len(on)} items is too many to pick by feel. Keep it to {MAX_ITEMS} or fewer; 8 reads best.")
         if not opens:
             problems.append("No gesture opens the wheel, so a triple press will.")
+        unnamed = [GESTURE_NAMES[g] for g in self.app_rows
+                   if self.gesture_boxes[g].currentData() == OPEN_APP and not self.app_rows[g].edit.text().strip()]
+        if unnamed:
+            problems.append("Type the app to open for: " + ", ".join(unnamed) + ".")
         blank = [sc["label"] for sc in s["shortcuts"] if not sc["keys"]]
         if blank:
             problems.append("Set the keys for: " + ", ".join(blank) + " (shortcuts without keys aren't saved).")
@@ -802,7 +904,7 @@ class SettingsWindow(QWidget):
         QFrame#group {{ background: {GROUP}; border: 1px solid {HAIR}; border-radius: 12px; }}
         QFrame#row {{ background: transparent; border: none; border-bottom: 1px solid {HAIR}; }}
         QFrame#row[last="true"] {{ border-bottom: none; }}
-        QFrame#row QLabel {{ background: transparent; }}
+        QFrame#row QLabel, QFrame#row QSlider {{ background: transparent; }}
         QToolButton#move {{ background: transparent; border: none; border-radius: 6px; padding: 3px; }}
         QToolButton#move:hover {{ background: #262A34; }}
         QToolButton#move:focus {{ border: 1px solid {a}; }}
@@ -812,6 +914,11 @@ class SettingsWindow(QWidget):
         QLineEdit#plain {{ background: transparent; border: 1px solid transparent; font-weight: 600; font-size: 14px; }}
         QLineEdit#plain:hover {{ border-color: #2D323D; }}
         QLineEdit#plain:focus {{ border-color: {a}; background: #20242D; }}
+        QSlider::groove:horizontal {{ height: 4px; background: #2D323D; border-radius: 2px; }}
+        QSlider::sub-page:horizontal {{ background: {a}; border-radius: 2px; }}
+        QSlider::handle:horizontal {{ background: #FFFFFF; width: 16px; height: 16px; margin: -6px 0;
+                                      border-radius: 8px; }}
+        QSlider::handle:horizontal:hover {{ background: #E8ECFF; }}
         QComboBox {{ background: #20242D; border: 1px solid #2D323D; border-radius: 8px;
                      padding: 6px 10px; font-size: 13px; }}
         QComboBox:hover {{ border-color: #3B4150; }}

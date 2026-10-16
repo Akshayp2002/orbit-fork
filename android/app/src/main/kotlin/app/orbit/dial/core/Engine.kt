@@ -211,6 +211,8 @@ interface Actions {
     fun launch(pkg: String)
     fun volume(): Float?
     fun haptic()
+    /** Take a photo: press the camera app's shutter, or open the camera if it isn't in front. */
+    fun shutter()
 }
 
 data class App(val pkg: String, val label: String)

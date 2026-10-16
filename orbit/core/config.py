@@ -108,19 +108,20 @@ def _read(path: Path) -> dict:
 
 def load(explicit: str | None = None, platform: str | None = None,
          user_settings: dict | None = None) -> tuple[dict, Path]:
-    """Built-in config.toml, then the user's overrides on top (or a full --config file),
-    then [platforms.<os>], then the Settings window's choices (`user_settings`).
+    """Built-in config.toml and its [platforms.<os>], then the user's overrides and theirs
+    on top (or a full --config file), then the Settings window's choices (`user_settings`).
     Returns the config and the path to open for editing."""
     if explicit:
         path = Path(explicit)
-        raw = _merge(DEFAULTS, _read(path))
+        cfg = apply_platform(_merge(DEFAULTS, _read(path)), platform)
     else:
-        raw = _merge(DEFAULTS, _read(base_config()))
+        # built-in (with its per-OS tweaks), then the user's file (with theirs) on top:
+        # a user setting always beats a built-in one, per-OS or not
+        cfg = apply_platform(_merge(DEFAULTS, _read(base_config())), platform)
         user = user_overrides(create=getattr(sys, "frozen", False))
         if user:
-            raw = _merge(raw, _read(user))
+            cfg = apply_platform(_merge(cfg, _read(user)), platform)
         path = user or base_config()
-    cfg = apply_platform(raw, platform)
     if user_settings:
         from orbit.core import settings
         cfg = settings.apply(cfg, user_settings)

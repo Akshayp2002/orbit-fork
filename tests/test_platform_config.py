@@ -61,7 +61,7 @@ def test_user_file_overrides_only_and_new_defaults_still_arrive(tmp_path, monkey
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     cfg, path = config_mod.load(platform="windows")
     assert path == user and user.exists() and "[tools.scroll]" not in user.read_text().replace("# [tools.scroll]", "")
-    assert cfg["tools"]["scroll"]["max_gain"] == 4.5                     # built-in default
+    assert cfg["tools"]["scroll"]["max_gain"] == 3.5                     # built-in Windows default
     user.write_text("[tools.scroll]\nmax_gain = 6\n[wheel]\ndismiss_after_ms = 3000\n", encoding="utf-8")
     cfg, _ = config_mod.load(platform="windows")
     assert cfg["tools"]["scroll"]["max_gain"] == 6                       # user wins

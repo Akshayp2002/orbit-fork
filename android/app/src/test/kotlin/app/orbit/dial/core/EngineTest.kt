@@ -32,6 +32,7 @@ class EngineTest {
         override fun launch(pkg: String) { log += "launch:$pkg" }
         override fun volume() = 0.5f
         override fun haptic() {}
+        override fun shutter() { log += "shutter" }
     }
     private val ui = object : Ui {
         override fun wheelOpen(items: List<Tool>, index: Int) { log += "ui:open:$index" }
@@ -153,6 +154,15 @@ class EngineTest {
         assertTrue(huds.last().strip!!.opened)
         e.tick(now + 2000)
         assertEquals(1, log.count { it.startsWith("open:") })     // no second open
+    }
+
+    @Test fun cameraPressIsTheShutterAndTurningDoesNothing() {
+        val e = engine()
+        e.setTool("camera")
+        e.ev(Kind.ROTATE, 1)
+        e.ev(Kind.CLICK); e.ev(Kind.CLICK)
+        assertEquals(listOf("shutter", "shutter"), log.filter { it == "shutter" })
+        assertTrue(log.none { it.startsWith("swipe") || it.startsWith("media:") })
     }
 
     @Test fun slidesIsOneSidewaysSwipePerClick() {

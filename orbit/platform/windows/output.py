@@ -69,6 +69,47 @@ def vk_of(name: str) -> int:
     return VK[name]
 
 
+def _best(name: str, candidates):
+    """Exact name, else starts with it, else contains it (case-insensitive)."""
+    n = name.lower()
+    items = [(c, label.lower()) for c, label in candidates]
+    for test in (lambda l: l == n, lambda l: l.startswith(n), lambda l: n in l):
+        hits = [c for c, label in items if test(label)]
+        if hits:
+            return min(hits, key=lambda c: len(str(c)))
+    return None
+
+
+def find_start_menu_app(name: str):
+    roots = [os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs"),
+             os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs")]
+    from pathlib import Path
+    links = [(p, p.stem) for root in roots if os.path.isdir(root) for p in Path(root).rglob("*.lnk")
+             if "uninstall" not in p.stem.lower()]
+    return _best(name, links)
+
+
+_store_apps: list | None = None
+
+
+def find_store_app(name: str):
+    """AppID of an installed Store / packaged app (Get-StartApps), cached."""
+    global _store_apps
+    if _store_apps is None:
+        import json
+        import subprocess
+        try:
+            out = subprocess.run(["powershell", "-NoProfile", "-Command",
+                                  "Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress"],
+                                 capture_output=True, text=True, timeout=15, creationflags=0x08000000).stdout
+            rows = json.loads(out) if out.strip() else []
+            _store_apps = [(r["AppID"], r["Name"]) for r in (rows if isinstance(rows, list) else [rows])]
+        except Exception:
+            log.exception("Get-StartApps failed")
+            _store_apps = []
+    return _best(name, _store_apps)
+
+
 class WindowsOutput(Output):
     def __init__(self, media_source=None):
         self.media_source = media_source
@@ -124,11 +165,35 @@ class WindowsOutput(Output):
 
     # ---------------- launch
     def launch(self, target):
+        """A path, URL or command, or an app by name ("Spotify", "DaVinci Resolve"):
+        looked up in the Start menu and the installed Store apps. Off the UI thread."""
+        threading.Thread(target=self._launch, args=(target,), daemon=True).start()
+
+    def _launch(self, target):
+        import shutil
+        import subprocess
+        t = target.strip()
         try:
-            os.startfile(target)
+            if os.path.exists(t) or "://" in t or ":\\" in t:
+                os.startfile(t)
+                return
+            exe = shutil.which(t) or shutil.which(t + ".exe")
+            if exe:
+                subprocess.Popen([exe])
+                return
+            lnk = find_start_menu_app(t)
+            if lnk:
+                os.startfile(lnk)
+                log.info("launch %s -> %s", t, lnk)
+                return
+            app_id = find_store_app(t)
+            if app_id:
+                subprocess.Popen(["explorer.exe", f"shell:AppsFolder\\{app_id}"])
+                log.info("launch %s -> %s", t, app_id)
+                return
+            subprocess.Popen(t, shell=True)                       # last resort: let the shell try
         except OSError:
-            import subprocess
-            subprocess.Popen(target, shell=True)
+            log.exception("could not open '%s'", t)
 
     def center_window(self, title, timeout=1.5, max_w=1000, max_h=800):
         """Wait for a small foreground window with this title (e.g. Claude's Quick Entry,
@@ -195,8 +260,7 @@ class WindowsOutput(Output):
         import uiautomation as auto
 
         with auto.UIAutomationInitializerInThread():
-            wins = [w for w in auto.GetRootControl().GetChildren()
-                    if w.Name == app_title and w.ClassName == "Chrome_WidgetWin_1"]
+            wins = [w for w in auto.GetRootControl().GetChildren() if w.Name == app_title]
             if not wins:
                 log.info("press_app_button: no '%s' window", app_title)
                 return

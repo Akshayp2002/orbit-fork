@@ -20,6 +20,35 @@ SLOW_GAP = 0.70    # at or over: a deliberate single click
 STREAK_FULL = 3    # fast reports in a row for full momentum
 
 
+class Pace:
+    """Smoothed turning speed, 0 (careful clicks) .. 1 (faster than the buds report).
+
+    The buds report at most one step every ~0.3 s and drop the clicks in between, so
+    normal turning lands anywhere in 0.3-0.8 s and neighbouring gaps differ by chance.
+    Speed eases toward the per-gap rate (EMA) instead of jumping with it. A turn-back
+    resets it: corrections are exact."""
+    FAST_GAP = 0.35
+    SLOW_GAP = 0.90
+    SMOOTH = 0.35
+
+    def __init__(self):
+        self._t = 0.0
+        self._dir = 0
+        self.speed = 0.0
+
+    def update(self, delta: int, now: float | None = None) -> float:
+        now = time.monotonic() if now is None else now
+        gap, self._t = now - self._t, now
+        d = 1 if delta > 0 else -1
+        raw = min(1.0, max(0.0, (self.SLOW_GAP - gap) / (self.SLOW_GAP - self.FAST_GAP)))
+        if d != self._dir:
+            self.speed = 0.0
+        else:
+            self.speed += self.SMOOTH * (raw - self.speed)
+        self._dir = d
+        return self.speed
+
+
 class SpinTracker:
     def __init__(self):
         self._t = 0.0

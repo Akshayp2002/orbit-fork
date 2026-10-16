@@ -166,6 +166,60 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
         if (!dispatchGesture(gesture, done, main)) { swipes.clear(); swiping = false }
     }
 
+    // ---- camera shutter
+    private val shutterWords = Regex("shutter|take (a )?(photo|picture)|capture|photo button", RegexOption.IGNORE_CASE)
+
+    override fun shutter() {
+        val root = rootInActiveWindow
+        val pkg = root?.packageName?.toString()
+        if (root == null || pkg == null || !isCameraApp(pkg)) {
+            Orbit.log("shutter: no camera in front, opening it")
+            runCatching {
+                startActivity(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            return
+        }
+        val node = findShutter(root)
+        if (node != null && node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)) {
+            Orbit.log("shutter: pressed '${node.contentDescription ?: node.viewIdResourceName}' in $pkg")
+            haptic()
+            return
+        }
+        // no labelled button: tap where camera apps put the shutter (bottom centre)
+        val dm = resources.displayMetrics
+        val p = Path().apply { moveTo(dm.widthPixels / 2f, dm.heightPixels * 0.87f) }
+        dispatchGesture(GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(p, 0, 60)).build(), null, main)
+        Orbit.log("shutter: no labelled button in $pkg, tapped bottom centre")
+        haptic()
+    }
+
+    private fun isCameraApp(pkg: String): Boolean {
+        if ("camera" in pkg.lowercase()) return true
+        val handlers = packageManager.queryIntentActivities(Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA), 0)
+        return handlers.any { it.activityInfo.packageName == pkg }
+    }
+
+    /** The best shutter candidate: id says "shutter", or its label does; clickable (or its parent). */
+    private fun findShutter(root: android.view.accessibility.AccessibilityNodeInfo): android.view.accessibility.AccessibilityNodeInfo? {
+        var best: android.view.accessibility.AccessibilityNodeInfo? = null
+        var bestScore = 0
+        val queue = ArrayDeque(listOf(root))
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 600) {
+            val n = queue.removeFirst(); seen++
+            var score = 0
+            if ("shutter" in (n.viewIdResourceName ?: "").lowercase()) score += 3
+            if (shutterWords.containsMatchIn("${n.contentDescription ?: ""} ${n.text ?: ""}")) score += 2
+            if (score > bestScore) {
+                val target = if (n.isClickable) n else n.parent?.takeIf { it.isClickable }
+                if (target != null) { best = target; bestScore = score }
+            }
+            for (i in 0 until n.childCount) n.getChild(i)?.let(queue::addLast)
+        }
+        return best
+    }
+
     // ---- zoom
     override fun zoom(scale: Float): Float {
         val mc = magnificationController

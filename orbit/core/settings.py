@@ -9,6 +9,7 @@ small settings.json next to the user config and this module applies it on load:
       "default_tool": "volume",
       "appearance": "system",                           # system | dark | light
       "claude_shortcut": "ctrl+alt+v",                  # Claude's Quick Entry shortcut
+      "scroll": {"max_gain": 3.5, "notches_per_detent": 1.0},   # this computer's scroll feel
       "shortcuts": [{"id": "sc1a2b", "label": "Snip", "keys": "win+shift+s"}],
                                                         # wheel items that press a key combo
       "gestures": {"click": "media:play_pause", "double": "open_wheel",
@@ -86,6 +87,11 @@ def wheel_order(cfg: dict) -> tuple[list[str], list[str]]:
 def apply(cfg: dict, s: dict) -> dict:
     """cfg with settings `s` layered on. Unknown tool ids are dropped, never fatal."""
     cfg = copy.deepcopy(cfg)
+    sc_feel = s.get("scroll") or {}
+    if "scroll" in cfg["tools"]:
+        for k in ("max_gain", "notches_per_detent"):
+            if isinstance(sc_feel.get(k), (int, float)) and sc_feel[k] > 0:
+                cfg["tools"]["scroll"][k] = float(sc_feel[k])
     if s.get("claude_shortcut"):
         cfg.setdefault("claude", {})["shortcut"] = s["claude_shortcut"]
     added = []
