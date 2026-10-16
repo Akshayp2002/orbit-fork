@@ -18,7 +18,7 @@ class EngineTest {
     private val actions = object : Actions {
         var bright = 0.5f
         var scale = 1f
-        override fun swipe(direction: Int) { log += "swipe:$direction" }
+        override fun swipe(direction: Int, sideways: Boolean) { log += if (sideways) "side:$direction" else "swipe:$direction" }
         override fun zoom(scale: Float): Float { this.scale = scale; log += "zoom:$scale"; return scale }
         override fun zoomScale() = scale
         override fun brightness() = bright
@@ -153,6 +153,13 @@ class EngineTest {
         assertTrue(huds.last().strip!!.opened)
         e.tick(now + 2000)
         assertEquals(1, log.count { it.startsWith("open:") })     // no second open
+    }
+
+    @Test fun slidesIsOneSidewaysSwipePerClick() {
+        val e = engine()
+        e.setTool("slides")
+        e.ev(Kind.ROTATE, 1); e.ev(Kind.ROTATE, 1); e.ev(Kind.ROTATE, -1)
+        assertEquals(listOf("side:1", "side:1", "side:-1"), log.filter { it.startsWith("side:") })
     }
 
     @Test fun scrollIsOneSwipePerClick() {

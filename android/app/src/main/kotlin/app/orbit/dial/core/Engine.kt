@@ -196,8 +196,8 @@ interface RotationControl {
 
 /** Everything a tool can do to the phone. Implemented by the accessibility service. */
 interface Actions {
-    /** One full swipe: +1 = finger up (next reel / further down the page), -1 = back. */
-    fun swipe(direction: Int)
+    /** One full swipe: +1 = next (finger up, or right-to-left when [sideways]), -1 = back. */
+    fun swipe(direction: Int, sideways: Boolean = false)
     fun zoom(scale: Float): Float          // returns the applied scale
     fun zoomScale(): Float
     fun brightness(): Float?               // 0..1, null if not permitted

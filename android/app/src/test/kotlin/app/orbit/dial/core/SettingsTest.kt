@@ -54,7 +54,7 @@ class SettingsTest {
     }
 
     private class FakeActions(val log: MutableList<String>) : Actions {
-        override fun swipe(direction: Int) {}
+        override fun swipe(direction: Int, sideways: Boolean) {}
         override fun zoom(scale: Float) = scale
         override fun zoomScale() = 1f
         override fun brightness() = 0.5f

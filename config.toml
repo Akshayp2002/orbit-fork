@@ -34,7 +34,7 @@ shortcut = "ctrl+alt+v"
 
 [wheel]
 # Clockwise order, starting at 12 o'clock. 8 or fewer reads best on a dial.
-items = ["volume", "brightness", "switcher", "scroll", "undo", "desktops", "tabs", "voice"]   # zoom: off by default
+items = ["volume", "brightness", "switcher", "scroll", "undo", "desktops", "tabs", "voice", "slides"]   # zoom: off by default
 dismiss_after_ms = 5000
 duck_volume = 0.5           # audio drops to this fraction while the wheel is open (1 = off)
 accel = 1                   # 1 = one item per click. 2 = fast reports move 2 (can skip one on quick deliberate clicks)
@@ -85,6 +85,17 @@ rotate_ccw = "keys:ctrl+minus"
 click = "keys:ctrl+0"
 detail_cw = "in"
 detail_ccw = "out"
+
+[tools.slides]
+type = "keys"               # presentations: PowerPoint, Keynote, Google Slides, PDF viewers
+label = "Slides"
+icon = "presentation"
+rotate_cw = "keys:right"    # one slide per click, never sped up
+rotate_ccw = "keys:left"
+detail_cw = "next slide"
+detail_ccw = "previous slide"
+click = "keys:b"            # black screen on / off (during the slideshow)
+detail_click = "black screen on / off"
 
 [tools.undo]
 type = "keys"

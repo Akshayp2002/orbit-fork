@@ -134,22 +134,30 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
     // ---- swipe: one quick thumb flick per click, queued so flicks never overlap.
     // Reels / Shorts / TikTok need ~25% of the screen at flick speed to page; this
     // travels 40% in 130 ms. A short gap between flicks lets the pager settle.
-    private val swipes = ArrayDeque<Int>()
+    private val swipes = ArrayDeque<Pair<Int, Boolean>>()       // (direction, sideways)
     private var swiping = false
 
-    override fun swipe(direction: Int) {
-        if (swipes.size < MAX_QUEUED_SWIPES) swipes.addLast(direction)
+    override fun swipe(direction: Int, sideways: Boolean) {
+        if (swipes.size < MAX_QUEUED_SWIPES) swipes.addLast(direction to sideways)
         if (!swiping) nextSwipe()
     }
 
     private fun nextSwipe() {
-        val dir = swipes.removeFirstOrNull() ?: run { swiping = false; return }
+        val (dir, sideways) = swipes.removeFirstOrNull() ?: run { swiping = false; return }
         swiping = true
         val dm = resources.displayMetrics
-        val x = dm.widthPixels / 2f
-        val low = dm.heightPixels * 0.70f
-        val high = dm.heightPixels * 0.30f
-        val path = Path().apply { if (dir > 0) { moveTo(x, low); lineTo(x, high) } else { moveTo(x, high); lineTo(x, low) } }
+        val path = Path()
+        if (sideways) {                    // next = finger right-to-left across the middle
+            val y = dm.heightPixels / 2f
+            val right = dm.widthPixels * 0.80f
+            val left = dm.widthPixels * 0.20f
+            if (dir > 0) { path.moveTo(right, y); path.lineTo(left, y) } else { path.moveTo(left, y); path.lineTo(right, y) }
+        } else {
+            val x = dm.widthPixels / 2f
+            val low = dm.heightPixels * 0.70f
+            val high = dm.heightPixels * 0.30f
+            if (dir > 0) { path.moveTo(x, low); path.lineTo(x, high) } else { path.moveTo(x, high); path.lineTo(x, low) }
+        }
         val done = object : GestureResultCallback() {
             override fun onCompleted(g: GestureDescription?) { main.postDelayed({ nextSwipe() }, SWIPE_GAP_MS) }
             override fun onCancelled(g: GestureDescription?) { main.postDelayed({ nextSwipe() }, SWIPE_GAP_MS) }

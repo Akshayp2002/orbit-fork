@@ -238,3 +238,15 @@ def test_wheel_is_one_item_per_click_by_default(monkeypatch):
         monkeypatch.setattr(motion.time, "monotonic", lambda t=t: t)
         e.handle(ev(Kind.ROTATE, 1))
     assert e.index == (start + 3) % len(e.wheel_ids)
+
+
+def test_slides_one_slide_per_click_even_fast_and_press_blacks_out():
+    e, out, ui, rot = make()
+    e.set_tool("slides")
+    for _ in range(4):                       # a fast spin: still exactly one slide each
+        e.handle(ev(Kind.ROTATE, 1))
+    e.handle(ev(Kind.ROTATE, -1))
+    keys = [c for k, c in out.log if k == "keys"]
+    assert keys == ["right"] * 4 + ["left"]
+    e.handle(ev(Kind.CLICK))
+    assert out.log[-1] == ("keys", "b")

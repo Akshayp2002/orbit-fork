@@ -39,6 +39,16 @@ class ScrollTool : Tool("scroll", "Scroll", "scroll") {
     }
 }
 
+/** Presentations and paged viewers: each click is one sideways swipe, next / previous
+ *  page (Google Slides, PowerPoint, PDF and photo viewers). Never sped up. */
+class SlidesTool : Tool("slides", "Slides", "presentation") {
+    override fun rotate(a: Actions, delta: Int): Hud {
+        val dir = if (delta > 0) 1 else -1
+        repeat(kotlin.math.abs(delta)) { a.swipe(dir, sideways = true) }
+        return Hud(icon, label, if (dir > 0) "next slide" else "previous slide", null, dir)
+    }
+}
+
 class BrightnessTool(private val step: Float = 0.06f, private val maxGain: Float = 3f) :
     Tool("brightness", "Brightness", "brightness") {
     private val spin = SpinTracker()
@@ -134,6 +144,7 @@ fun defaultTools(): List<Tool> = listOf(
     VolumeTool(),
     BrightnessTool(),
     ScrollTool(),
+    SlidesTool(),
     AppsTool(),
     ZoomTool(),
     TorchTool(),

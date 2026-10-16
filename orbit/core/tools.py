@@ -58,7 +58,7 @@ class Tool:
         if a is None:
             return False
         a(e)
-        return Hud(self.icon, self.label, str(a))
+        return Hud(self.icon, self.label, self.cfg.get(f"detail_{name}", str(a)))
 
     def hud(self, e: "Engine") -> Hud:
         return Hud(self.icon, self.label)
