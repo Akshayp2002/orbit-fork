@@ -87,9 +87,19 @@ def screenshot(name, delay):
         time.sleep(1)
     r = subprocess.run(["screencapture", "-x", str(path)], capture_output=True, text=True)
     ok = r.returncode == 0 and path.exists() and path.stat().st_size > 0
-    say(f"\r  {G}📸 saved {path.name}{X}      " if ok else
-        f"\r  {R}screenshot failed (Screen Recording permission?) {r.stderr.strip()}{X}")
-    report.append(f"- screenshot: `{path.name}`" if ok else f"- screenshot {name}: FAILED")
+    if not ok:
+        # no Screen Recording permission for this terminal: let the tester take it
+        say(f"\r  {Y}📸 Take it yourself now: ⌘⇧4, then Space, then click the window/wheel "
+            f"(for the menu bar: ⌘⇧4 and drag a box around the icon).{X}")
+        wait("Press Enter once the screenshot is saved")
+        loc = subprocess.run(["defaults", "read", "com.apple.screencapture", "location"],
+                             capture_output=True, text=True).stdout.strip() or "~/Desktop"
+        shots = sorted(Path(os.path.expanduser(loc)).glob("Screenshot*.png"), key=lambda p: p.stat().st_mtime)
+        if shots and time.time() - shots[-1].stat().st_mtime < 120:
+            path.write_bytes(shots[-1].read_bytes())
+            ok = True
+    say(f"\r  {G}📸 saved {path.name}{X}      " if ok else f"\r  {R}screenshot not found{X}")
+    report.append(f"- screenshot: `{path.name}`" if ok else f"- screenshot {name}: missing")
 
 
 def orbit_pids():
@@ -239,19 +249,134 @@ def test_shortcuts():
     wait()
 
 
-def test_gestures():
-    header(5, "Gestures")
-    step("Start something playing in Music or Spotify.")
+def test_icons():
+    header(8, "Icons + Settings preview")
+    step("Look at Orbit's icon in the menu bar.")
+    ask("Is it a plain black/white icon like the other menu-bar icons (not coloured)?")
+    screenshot("menubar_icon", 0)
+    subprocess.run(["touch", str(APP)])
+    subprocess.run(["open", "-R", str(APP)])
+    step("A Finder window opened with Orbit.app selected.")
+    ask("Does Finder show the Orbit mark (not a generic app/Python icon)?")
+    screenshot("finder_icon", 0)
+    step("Menu-bar Orbit icon › Settings… — look at the wheel preview on the left.")
     wait()
-    for label, how, expect in [("press", "SINGLE-press the bud", "Did playback pause/resume?"),
-                               ("double", "DOUBLE-press the bud", "Did the wheel open?"),
-                               ("triple", "TRIPLE-press the bud", "Did it switch to the previous tool?")]:
+    ask("Are the icons small (~20 pt), evenly spaced round the ring, and the centre text readable (not covered)?")
+    screenshot("settings_preview", 0)
+
+
+def test_slides():
+    header(9, "Slides tool")
+    for app in ("Keynote", "PowerPoint / Google Slides in Safari"):
+        if ask(f"Test {app} now?") != "y":
+            continue
+        step(f"Open a deck with 8+ slides in {app} and START THE SLIDESHOW (Keynote: ⌥⌘P; Google Slides: ⌘⏎).")
+        wait()
         pos = log_pos()
-        step(how)
+        step("Double-press › turn to 'Slides' (last on the wheel) › press.")
+        step("Turn 5 clicks FORWARD (any speed), then 2 clicks BACK.")
         wait("Press Enter when done")
-        keep_log(label, log_since(pos), r"orbit\.engine:|orbit\.media|Traceback")
-        ask(expect)
+        ask(f"{app}: did it move exactly 5 slides forward, then exactly 2 back?")
+        step("Single-press → screen should go black. Single-press again → slide comes back.")
+        wait("Press Enter when done")
+        keep_log(f"slides_{app.split()[0].lower()}", log_since(pos), r"orbit\.engine:|orbit\.out|keys|Traceback")
+        ask(f"{app}: did press toggle black screen on and off?")
+        note(f"{app}: anything odd?")
+    step("Leave the slideshow (Esc) and switch Orbit back to Volume (double-press › Volume › press).")
+    wait()
+
+
+def test_timeline():
+    header(10, "Timeline tool (DaVinci Resolve / Final Cut)")
+    step("Open DaVinci Resolve (or Final Cut) with a clip on the timeline; click the timeline once so it has focus.")
+    wait()
+    pos = log_pos()
+    step("Double-press › turn to 'Timeline' › press.")
+    step("Turn 3 SLOW careful clicks forward, then ONE quick click, then a FAST spin.")
+    wait("Press Enter when done")
+    ask("Did each slow click move exactly 1 frame?")
+    ask("Was the single quick click still just 1 frame (not a jump)?")
+    ask("Did the fast spin jump (Resolve ~1 s, FCP ~10 frames per click)?")
+    step("Single-press → play. Single-press again → pause.")
+    wait("Press Enter when done")
+    keep_log("timeline", log_since(pos), r"orbit\.engine:|keys|Traceback")
+    ask("Did press toggle play/pause?")
+    note("Timeline: anything odd?")
+
+
+def test_camera():
+    header(11, "Camera tool (Photo Booth)")
+    step("Settings… › turn the 'Camera' wheel item ON, Save.")
+    step("Open Photo Booth.")
+    wait()
+    pos = log_pos()
+    step("Double-press › turn to 'Camera' › press. Then single-press once more.")
+    wait("Press Enter when done")
+    keep_log("camera", log_since(pos), r"orbit\.engine:|keys|Traceback")
+    ask("Did a press take a photo (countdown + flash)?")
+    note("Camera: anything odd?")
+
+
+def test_scroll_sliders():
+    header(12, "Settings › Scroll sliders")
+    step("Switch Orbit to Scroll (double-press › Scroll › press) and scroll a Safari page — note the feel.")
+    wait()
+    step("Settings… › Scroll: move 'fast-turn speed' a lot higher and 'distance per click' higher, Save.")
+    step("Scroll the same page again (no restart).")
+    wait("Press Enter when done")
+    ask("Did the feel change right away, without restarting Orbit?")
+    step("Put the sliders back where you like them (default fast-turn = 4.5×), Save.")
+    wait()
+    note("Sliders: anything odd?")
+
+
+def test_open_app():
+    header(13, "Open an app from a press gesture")
+    step("Settings… › Dial › Triple press = 'Open an app…' › Spotify (quit Spotify first). Save.")
+    wait()
+    pos = log_pos()
+    step("Triple-press the bud.")
+    wait("Press Enter when done")
+    keep_log("open_app", log_since(pos), r"orbit\.engine:|launch|open|Traceback")
+    ask("Did Spotify launch?")
+    step("Set Triple press back to what you had before, Save.")
+    wait()
+
+
+def test_gestures():
+    header(5, "Gestures + now-playing (Spotify / Music)")
+    step("Make sure the Volume tool is active, and PAUSE Spotify (in the Spotify app, not with the bud).")
+    wait()
+    say("  Loop 3 times: press → music plays · wait 1 s · double → wheel opens · press to close it · press → music pauses")
+    for i in range(1, 4):
+        pos = log_pos()
+        step(f"Round {i}: single-press (play) … wait 1 s … double-press")
+        wait("Press Enter once you've done the double-press")
+        owner = now_playing()
+        ask(f"Round {i}: did Spotify start AND did the wheel open on the double-press?")
+        step("Press once to close the wheel, then single-press again to pause Spotify.")
+        wait("Press Enter when done")
+        report.append(f"- round {i}: now-playing owner after double = `{owner}`")
+        keep_log(f"spotify_round{i}", log_since(pos), r"orbit\.engine:|orbit\.media|media:|reassert|Traceback")
+        ask(f"Round {i}: did Spotify pause?")
+    gestures = {}
+    try:
+        import json
+        gestures = json.loads((Path.home() / "Library/Application Support/Orbit/settings.json").read_text()).get("gestures", {})
+    except Exception:
+        pass
+    pos = log_pos()
+    step(f"TRIPLE-press the bud (your setting: {gestures.get('triple', 'previous tool')}).")
+    wait("Press Enter when done")
+    keep_log("triple", log_since(pos), r"orbit\.engine:|orbit\.media|Traceback")
+    ask("Did triple-press do what your setting says?")
     note("Anything else odd with gestures?")
+
+
+def now_playing():
+    r = subprocess.run(["nowplaying-cli", "get-raw"], capture_output=True, text=True)
+    m = re.search(r'ClientBundleIdentifier" : "([^"]+)"', r.stdout)
+    return m.group(1) if m else (r.stderr.strip() or "unknown")
 
 
 def test_hud():
@@ -274,7 +399,9 @@ def write_report(finished):
 
 TESTS = [("1", "Click counting", test_clicks), ("2", "Scroll", test_scroll), ("3", "Wheel look", test_look),
          ("4", "Settings window", test_settings), ("5", "Gestures", test_gestures), ("6", "System UI", test_hud),
-         ("7", "Shortcuts", test_shortcuts)]
+         ("7", "Shortcuts", test_shortcuts), ("8", "Icons + Settings preview", test_icons),
+         ("9", "Slides", test_slides), ("10", "Timeline", test_timeline), ("11", "Camera", test_camera),
+         ("12", "Scroll sliders", test_scroll_sliders), ("13", "Open app gesture", test_open_app)]
 
 if __name__ == "__main__":
     say(f"{B}Orbit · Mac guided test{X}   {D}(Ctrl-C any time — progress so far is still saved){X}")
