@@ -116,11 +116,21 @@ class VolumeDial(
             // floor(+0.3): one click from an off-grid level stays 1
             val clicks = if (streamSteps != null) 1 else min(MAX_CLICKS, max(1, (abs(d) / step + 0.3f).toInt()))
             lastMove = now; lastDial = now
+            var immediateRestore: Float? = null
             if (!passthrough) {
-                needRecenter = true
+                if (streamSteps != null && home != null && abs(newLevel - home!!) >= 0.5f * step) {
+                    val t = home!!
+                    setAt = now
+                    setBefore = newLevel
+                    setTarget = t
+                    immediateRestore = t
+                } else {
+                    needRecenter = true
+                }
             }
             out = DialEvent(Kind.ROTATE, if (d > 0) clicks else -clicks, source, now)
         }
+        immediateRestore?.let { backend.setLevel(it) }
         out?.let(emit)
     }
 
@@ -157,7 +167,7 @@ class VolumeDial(
 
     internal fun snapHome(l: Float): Float {
         val n = grid()
-        val k = min(max((l * n).roundToInt(), EDGE_STEPS + 1), n - EDGE_STEPS - 1)
+        val k = min(max((l * n).roundToInt(), 3), n - 3)
         return k.toFloat() / n
     }
 }

@@ -34,7 +34,7 @@ class VolumeTool : Tool("volume", "Volume", "volume") {
 class ScrollTool : Tool("scroll", "Scroll", "scroll") {
     override fun rotate(a: Actions, delta: Int): Hud {
         val dir = if (delta > 0) 1 else -1
-        repeat(kotlin.math.abs(delta)) { a.swipe(dir) }
+        a.swipe(dir)
         return Hud(icon, label, if (dir > 0) "next" else "previous", null, dir)
     }
 }
@@ -44,7 +44,7 @@ class ScrollTool : Tool("scroll", "Scroll", "scroll") {
 class SlidesTool : Tool("slides", "Slides", "presentation") {
     override fun rotate(a: Actions, delta: Int): Hud {
         val dir = if (delta > 0) 1 else -1
-        repeat(kotlin.math.abs(delta)) { a.swipe(dir, sideways = true) }
+        a.swipe(dir, sideways = true)
         return Hud(icon, label, if (dir > 0) "next slide" else "previous slide", null, dir)
     }
 }
