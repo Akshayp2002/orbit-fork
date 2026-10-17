@@ -250,3 +250,17 @@ def test_slides_one_slide_per_click_even_fast_and_press_blacks_out():
     assert keys == ["right"] * 4 + ["left"]
     e.handle(ev(Kind.CLICK))
     assert out.log[-1] == ("keys", "b")
+
+
+def test_timeline_pans_the_view_sideways_and_press_plays():
+    """Resolve feedback: the dial should slide the timeline view, not move the playhead."""
+    e, out, ui, rot = make()
+    e.set_tool("scrub")
+    assert e.tool.horizontal
+    hud = e.tool.rotate(e, 1)
+    assert hud.detail.startswith("later")
+    time.sleep(0.4)                          # smooth scroll delivers over a few frames
+    assert sum(n for k, n in out.log if k == "scroll") > 0.8
+    assert not any(k == "keys" for k, _ in out.log)      # no arrow keys: the playhead stays
+    e.handle(ev(Kind.CLICK))
+    assert out.log[-1] == ("keys", "space")

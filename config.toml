@@ -98,14 +98,14 @@ click = "keys:b"            # black screen on / off (during the slideshow)
 detail_click = "black screen on / off"
 
 [tools.scrub]
-type = "scrub"              # video timeline: DaVinci Resolve, Premiere Pro, Final Cut Pro...
-label = "Timeline"
-icon = "film"
-fine_cw = "keys:right"      # careful clicks: one frame
-fine_ccw = "keys:left"
-coarse_cw = "keys:shift+right"   # turning fast: Resolve 1 s, Premiere 5 frames, FCP 10 frames
-coarse_ccw = "keys:shift+left"
-coarse_at = 0.55            # how fast (0..1) before it jumps instead of stepping
+type = "smooth_scroll"      # video timeline (DaVinci Resolve, Premiere, Final Cut): pans the view
+horizontal = true           # smooth sideways scroll to the timeline under the mouse pointer;
+label = "Timeline"          # the playhead stays put. (type = "scrub" steps the playhead instead:
+icon = "film"               #  arrows per click, Shift+arrows when turning fast.)
+notches_per_detent = 1.0
+max_gain = 4
+detail_cw = "later"
+detail_ccw = "earlier"
 click = "keys:space"        # play / pause
 detail_click = "play / pause"
 

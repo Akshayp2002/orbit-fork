@@ -164,7 +164,7 @@ class SmoothScrollTool(Tool):
             self._pending += impulse
             # glide only builds with sustained speed
             self._vel += impulse * speed ** 2 * self.momentum_k
-        detail = "down" if d > 0 else "up"
+        detail = self.cfg.get("detail_cw", "right" if self.horizontal else "down") if d > 0 else             self.cfg.get("detail_ccw", "left" if self.horizontal else "up")
         if speed > 0.5:
             detail += " · fast"
         return Hud(self.icon, self.label, detail, None, d)
