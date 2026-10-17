@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbit: the CMF Buds Pro 2 dial as a controller</title>
+<meta name="description" content="Turn the dial on your CMF Buds Pro 2 case into a controller for Windows, macOS and Android. Scroll reels, flip slides, scrub video, switch apps. Free and open source.">
+<meta property="og:title" content="Orbit: your earbuds case is now a controller">
+<meta property="og:description" content="Double-press the CMF Buds Pro 2 dial, turn to pick, press to choose. Windows, macOS, Android. Free.">
+<meta property="og:image" content="orbit.png">
+<link rel="icon" href="orbit.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0B0C11; --bg2: #11131A; --line: #222631; --ink: #F2F4F8; --ink2: #A4AAB8; --ink3: #6E7483;
+    --accent: #7C9CFF; --accent-ink: #0B1230;
+    --max: 1080px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; overflow-x: clip; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 400 17px/1.6 "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 10px; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
+  header { display: flex; align-items: center; gap: 10px; padding: 22px 0; }
+  header img { width: 30px; height: 30px; }
+  header b { font-weight: 600; letter-spacing: -0.01em; }
+  header nav { margin-left: auto; display: flex; gap: 22px; font-size: 15px; }
+  header nav a { color: var(--ink2); text-decoration: none; }
+  header nav a:hover { color: var(--ink); }
+
+  /* ---- hero */
+  .hero { display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 48px; align-items: center; padding: 56px 0 80px; }
+  h1 { font-size: clamp(40px, 6vw, 68px); line-height: 1.02; letter-spacing: -0.035em; margin: 0 0 20px; font-weight: 700; }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: 20px; color: var(--ink2); max-width: 34ch; margin: 0 0 32px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 12px; font-weight: 600; text-decoration: none; font-size: 17px; transition: transform .15s ease, background .15s ease; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { background: #93ADFF; transform: translateY(-1px); }
+  .btn.ghost { color: var(--ink); border: 1px solid var(--line); }
+  .btn.ghost:hover { border-color: #3A4050; }
+  .fine { margin-top: 18px; color: var(--ink3); font-size: 14px; }
+  .others { margin-top: 10px; font-size: 15px; color: var(--ink2); }
+  .others a { margin-right: 14px; }
+
+  /* ---- the wheel: the selected item is a light source */
+  .stage { position: relative; aspect-ratio: 1; max-width: 460px; justify-self: center; width: 100%; }
+  .disc { position: absolute; inset: 9%; border-radius: 50%; background: #090A0E; box-shadow: 0 30px 60px -20px rgba(0,0,0,.8), inset 0 0 0 1px rgba(255,255,255,.06); overflow: hidden; }
+  .light { position: absolute; inset: 0; transform: rotate(var(--sel, 0deg)); transition: transform .7s cubic-bezier(.3,1.35,.5,1); }
+  .light::before { content: ""; position: absolute; left: 50%; top: 16%; width: 120%; height: 120%; transform: translate(-50%, -50%);
+    background: radial-gradient(circle at 50% 50%, rgba(124,156,255,.42), rgba(124,156,255,.20) 10%, rgba(124,156,255,.08) 24%, rgba(124,156,255,.02) 38%, transparent 55%); }
+  .spill { position: absolute; inset: 2%; border-radius: 50%; transform: rotate(var(--sel, 0deg)); transition: transform .7s cubic-bezier(.3,1.35,.5,1);
+    background: conic-gradient(from -40deg, rgba(124,156,255,.0), rgba(124,156,255,.35) 40deg, rgba(124,156,255,0) 80deg, transparent 360deg);
+    -webkit-mask: radial-gradient(circle, transparent 63%, #000 64%, #000 69%, transparent 74%); mask: radial-gradient(circle, transparent 63%, #000 64%, #000 69%, transparent 74%); filter: blur(6px); }
+  .items { position: absolute; inset: 9%; }
+  .items span { position: absolute; width: 30px; height: 30px; margin: -15px; display: grid; place-items: center; color: rgba(255,255,255,.5);
+    left: calc(50% + 34% * sin(var(--a))); top: calc(50% - 34% * cos(var(--a))); }
+  .items span { transition: color .4s ease, transform .4s ease; }
+  .items span.on { color: #fff; transform: scale(1.15); }
+  .items svg { width: 22px; height: 22px; }
+  .centre { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; }
+  .centre b { display: block; font-size: 22px; letter-spacing: -0.01em; }
+  .centre small { color: var(--ink3); font-size: 13px; }
+  @media (prefers-reduced-motion: reduce) { .light, .spill, .items span { transition: none; } }
+
+  /* ---- sections */
+  section { padding: 72px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: clamp(28px, 3.4vw, 40px); letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 14px; }
+  .sub { color: var(--ink2); max-width: 60ch; margin: 0 0 40px; }
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; counter-reset: s; }
+  .step h3 { margin: 14px 0 6px; font-size: 19px; }
+  .step p { margin: 0; color: var(--ink2); }
+  .pips { display: flex; gap: 6px; height: 14px; align-items: center; }
+  .pips i { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+  .pips i.ring { width: 34px; height: 34px; border-radius: 50%; background: none; border: 3px solid var(--accent); }
+  .tools { display: grid; grid-template-columns: repeat(2, 1fr); column-gap: 56px; }
+  .tool { display: grid; grid-template-columns: 28px 1fr; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+  .tool svg { width: 22px; height: 22px; color: var(--accent); margin-top: 3px; }
+  .tool b { display: block; font-weight: 600; }
+  .tool span { color: var(--ink2); font-size: 15px; }
+  .plat { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .plat > div { padding: 26px; border-right: 1px solid var(--line); }
+  .plat > div:last-child { border-right: none; }
+  .plat h3 { margin: 0 0 4px; font-size: 20px; }
+  .plat p { color: var(--ink2); font-size: 15px; margin: 8px 0 18px; }
+  .plat .btn { padding: 11px 16px; font-size: 15px; }
+  details { border-bottom: 1px solid var(--line); padding: 18px 0; }
+  summary { cursor: pointer; font-weight: 600; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+  summary::after { content: "+"; color: var(--ink3); font-weight: 400; }
+  details[open] summary::after { content: "–"; }
+  details p { color: var(--ink2); margin: 10px 0 0; max-width: 70ch; }
+  footer { padding: 40px 0 60px; color: var(--ink3); font-size: 14px; border-top: 1px solid var(--line); }
+  footer a { color: var(--ink2); }
+
+  @media (max-width: 860px) {
+    .hero { grid-template-columns: 1fr; padding-top: 24px; gap: 24px; }
+    .stage { max-width: 340px; order: -1; }
+    .steps, .tools, .plat { grid-template-columns: 1fr; }
+    .plat > div { border-right: none; border-bottom: 1px solid var(--line); }
+    .plat > div:last-child { border-bottom: none; }
+    header nav { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="orbit.png" alt="">
+    <b>Orbit</b>
+    <nav><a href="#how">How it works</a><a href="#download">Download</a><a href="#faq">FAQ</a><a href="https://github.com/harsha20599/orbit">GitHub</a></nav>
+  </header>
+
+  <div class="hero">
+    <div>
+      <h1>Your earbuds case is now a <em>controller</em>.</h1>
+      <p class="lede">Orbit turns the dial on the CMF Buds Pro 2 into a wheel of tools for your computer and phone. Scroll reels, flip slides, scrub video, switch apps.</p>
+      <div class="cta">
+        <a class="btn primary" id="dl" href="#download">Download Orbit</a>
+        <a class="btn ghost" href="#how">See how it works</a>
+      </div>
+      <p class="others" id="others"></p>
+      <p class="fine">Free and open source · Windows, macOS, Android · Needs CMF Buds Pro 2</p>
+    </div>
+    <div class="stage" aria-hidden="true">
+      <div class="spill"></div>
+      <div class="disc"><div class="light"></div></div>
+      <div class="items">
+        <span data-n="Volume" style="--a:0deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.7a.7.7 0 0 0-1.2-.5L6.4 7.6A1.4 1.4 0 0 1 5.4 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4a1.4 1.4 0 0 1 1 .4l3.4 3.4a.7.7 0 0 0 1.2-.5z"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.4 18.4a9 9 0 0 0 0-12.7"/></svg></span>
+        <span data-n="Scroll" style="--a:45deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="7"/><path d="M12 6v4"/></svg></span>
+        <span data-n="Slides" style="--a:90deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/></svg></span>
+        <span data-n="Timeline" style="--a:135deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 12h18"/><path d="M17 3v18"/></svg></span>
+        <span data-n="Brightness" style="--a:180deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/></svg></span>
+        <span data-n="Undo" style="--a:225deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></span>
+        <span data-n="Desktops" style="--a:270deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg></span>
+        <span data-n="Camera" style="--a:315deg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span>
+      </div>
+      <div class="centre"><div><b id="selname">Volume</b><small>turn to pick · press to choose</small></div></div>
+    </div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <h2>Three moves. That's the whole thing.</h2>
+    <p class="sub">No new hardware. Orbit listens to the dial through the buds' own Bluetooth controls, so it works the moment they're connected.</p>
+    <div class="steps">
+      <div class="step"><div class="pips"><i></i><i></i></div><h3>Double-press</h3><p>The wheel opens on your screen, wherever you are.</p></div>
+      <div class="step"><div class="pips"><i class="ring"></i></div><h3>Turn</h3><p>Glide to a tool: the item you land on lights up the wheel around it.</p></div>
+      <div class="step"><div class="pips"><i></i></div><h3>Press</h3><p>Now the dial drives that tool, until you double-press again.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2>What the dial can do</h2>
+    <p class="sub">Pick what's on the wheel, its order and what every press does, in Settings.</p>
+    <div class="tools">
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="7"/><path d="M12 6v4"/></svg><div><b>Scroll &amp; reels</b><span>Smooth page scrolling; one flick per click on your phone.</span></div></div>
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h20"/><path d="M21 3v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3"/><path d="m7 21 5-5 5 5"/></svg><div><b>Slides</b><span>One slide per click. Press to black out the screen.</span></div></div>
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 3v18"/><path d="M3 12h18"/><path d="M17 3v18"/></svg><div><b>Video timeline</b><span>Glide through DaVinci Resolve, Premiere or Final Cut. Press to play.</span></div></div>
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg><div><b>App switcher</b><span>Turn through your open apps, let go to jump.</span></div></div>
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="M2 12h2"/><path d="M20 12h2"/></svg><div><b>Volume &amp; brightness</b><span>Exact clicks when slow, big moves when fast.</span></div></div>
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg><div><b>Camera shutter</b><span>Press the dial, take the photo. Great with a tripod.</span></div></div>
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg><div><b>Undo, tabs, desktops</b><span>Turn back through history, tabs or virtual desktops.</span></div></div>
+      <div class="tool"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M7 16h10"/><path d="M6 8h.01"/><path d="M10 8h.01"/><path d="M14 8h.01"/><path d="M18 8h.01"/></svg><div><b>Your own shortcuts</b><span>Add any key combo to the wheel. Open any app with a triple press.</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <h2>Download</h2>
+    <p class="sub">Pair your CMF Buds Pro 2 with the device first. Then install Orbit:</p>
+    <div class="plat">
+      <div><h3>Windows</h3><p>Windows 10 or 11. If Windows says "protected your PC", choose <i>More info → Run anyway</i>. Allow admin when Orbit starts (for press-and-hold).</p><a class="btn primary" href="https://github.com/harsha20599/orbit/releases/latest/download/Orbit-Windows-Setup.exe">Download for Windows</a></div>
+      <div><h3>macOS</h3><p>macOS 13+ on Apple Silicon. Unzip, move to Applications, right-click → <i>Open</i> the first time, then allow Accessibility.</p><a class="btn primary" href="https://github.com/harsha20599/orbit/releases/latest/download/Orbit-macOS.zip">Download for Mac</a></div>
+      <div><h3>Android</h3><p>Android 8+. Install the APK, then follow the checklist in the app. If a switch is greyed out: App info → ⋮ → <i>Allow restricted settings</i>.</p><a class="btn primary" href="https://github.com/harsha20599/orbit/releases/latest/download/Orbit-Android.apk">Download for Android</a></div>
+    </div>
+    <p class="fine">Every version and its notes: <a href="https://github.com/harsha20599/orbit/releases">all releases</a>. Want to know about updates? Click <i>Watch → Custom → Releases</i> on <a href="https://github.com/harsha20599/orbit">GitHub</a>.</p>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <h2>Questions</h2>
+    <details><summary>Does it work with other earbuds?</summary><p>Not yet. Orbit is tuned to the CMF Buds Pro 2 dial: how it reports each click, its 16 steps and its timing. Other buds with a dial or volume wheel might partly work, but aren't supported.</p></details>
+    <details><summary>Why do fast spins skip a little?</summary><p>The buds send at most about three dial steps a second and drop the rest. Orbit makes fast turning go further to make up for it; slow clicks are always exact.</p></details>
+    <details><summary>Is it safe? What does it access?</summary><p>Orbit runs only on your device and sends nothing anywhere. The code is open on GitHub. On Android it uses an accessibility service to draw the wheel and do what you pick; it reads only the name of the app in front, and the camera's buttons when you use the Camera tool.</p></details>
+    <details><summary>Why does Windows warn about the installer?</summary><p>The installer isn't code-signed yet (that costs money every year), so Windows SmartScreen shows a warning for new apps. Choose More info → Run anyway. The source is public if you'd rather build it yourself.</p></details>
+    <details><summary>The clicks make a little sound in the buds.</summary><p>That's the buds' own volume tone; apps can't turn it off. Orbit keeps your music level steady while you use tools.</p></details>
+    <details><summary>Something isn't working.</summary><p><a href="https://github.com/harsha20599/orbit/issues/new/choose">Open an issue</a> with your device and the log (Windows: tray icon → Open log; Mac: ~/.orbit/orbit.log; Android: "Copy log" in the app).</p></details>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">Orbit is free and open source (MIT) · <a href="https://github.com/harsha20599/orbit">GitHub</a> · <a href="https://github.com/harsha20599/orbit/issues">Issues</a> · Not affiliated with Nothing or CMF.</div>
+</footer>
+
+<script>
+  // The demo wheel: the light steps from tool to tool like the real one.
+  (function () {
+    var stage = document.querySelector(".stage"), items = stage.querySelectorAll(".items span");
+    var name = document.getElementById("selname"), i = 0, turns = 0;
+    function show() {
+      items.forEach(function (el, k) { el.classList.toggle("on", k === i); });
+      stage.style.setProperty("--sel", (turns * 360 + i * 45) + "deg");
+      name.textContent = items[i].dataset.n;
+    }
+    show();
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      setInterval(function () { i = (i + 1) % items.length; if (i === 0) turns++; show(); }, 1600);
+    }
+  })();
+  // Point the main button at the visitor's platform.
+  (function () {
+    var base = "https://github.com/harsha20599/orbit/releases/latest/download/";
+    var ua = navigator.userAgent, plat = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+    var os = /Android/i.test(ua) ? "android" : /Win/i.test(plat) ? "windows" : /Mac/i.test(plat) && !/iPhone|iPad/.test(ua) ? "mac" : null;
+    var files = { windows: ["Orbit-Windows-Setup.exe", "Download for Windows"], mac: ["Orbit-macOS.zip", "Download for Mac"],
+                  android: ["Orbit-Android.apk", "Download for Android"] };
+    var dl = document.getElementById("dl"), others = document.getElementById("others");
+    if (os) { dl.href = base + files[os][0]; dl.textContent = files[os][1]; }
+    var links = Object.keys(files).filter(function (k) { return k !== os; }).map(function (k) {
+      return '<a href="' + base + files[k][0] + '">' + files[k][1].replace("Download for ", "") + "</a>";
+    });
+    others.innerHTML = (os ? "Also for " : "For ") + links.join("");
+  })();
+</script>
+</body>
+</html>

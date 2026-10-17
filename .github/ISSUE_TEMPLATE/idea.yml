@@ -1,0 +1,11 @@
+name: Idea / feature request
+description: A tool or behaviour you'd like
+labels: [idea]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What should the dial do, and where?
+      placeholder: "e.g. A Figma tool: turn to zoom, press to fit"
+    validations:
+      required: true

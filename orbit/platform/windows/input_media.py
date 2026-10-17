@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import sys
 import threading
 import time
 import wave
@@ -170,12 +172,17 @@ class MediaButtonSource(InputSource):
             log.exception("media guard stopped")
 
     async def _learn_own_aumid(self):
+        # Ours carries SESSION_TITLE; if another Orbit runs too (a dev copy beside the
+        # installed one), prefer the session named after our own executable.
+        exe = os.path.basename(sys.executable).lower()
+        found = []
         for sess in self._mgr.get_sessions():
             props = await sess.try_get_media_properties_async()
             if props and props.title == SESSION_TITLE:
-                self.own_aumid = sess.source_app_user_model_id
-                log.info("own media session id: %s", self.own_aumid)
-                break
+                found.append(sess.source_app_user_model_id)
+        if found:
+            self.own_aumid = next((a for a in found if a.lower().endswith(exe)), found[0])
+            log.info("own media session id: %s", self.own_aumid)
         cur = self._mgr.get_current_session()
         if cur and self.own_aumid and cur.source_app_user_model_id != self.own_aumid:
             log.info("%s holds media focus at startup — reasserting", cur.source_app_user_model_id)

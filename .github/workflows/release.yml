@@ -1,0 +1,131 @@
+name: release
+
+# Push a tag like v0.1.0 (or run by hand) -> builds all three apps and attaches them to a
+# DRAFT GitHub release. Nothing is public until the draft is published by hand.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, e.g. 0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: python -m pip install -r requirements.txt pyinstaller pillow
+      - name: Tests
+        run: python -m pytest -q tests
+      - name: Build Orbit.exe
+        run: python packaging/windows/build_exe.py
+      - name: Packaged app starts and handles a dial event
+        shell: pwsh
+        run: |
+          $env:LOCALAPPDATA = "$env:RUNNER_TEMP\local"; $env:APPDATA = "$env:RUNNER_TEMP\roam"
+          New-Item -ItemType Directory -Force $env:LOCALAPPDATA, $env:APPDATA | Out-Null
+          $p = Start-Process dist\Orbit\Orbit.exe -ArgumentList "--no-elevate","--dev","--debug" -PassThru
+          Start-Sleep 15
+          python -m orbit.inject double
+          Start-Sleep 3
+          $log = Get-Content "$env:LOCALAPPDATA\Orbit\orbit.log" -Raw
+          Stop-Process $p -Force
+          $log
+          if ($log -notmatch "Orbit running" -or $log -notmatch "double <dev-udp>") { throw "packaged Orbit.exe did not start or handle input" }
+      - name: Installer
+        shell: pwsh
+        run: |
+          $v = "${{ env.VERSION }}".TrimStart("v")
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) { choco install innosetup -y --no-progress | Out-Null }
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          & $iscc /Q "/DAppVersion=$v" packaging\windows\orbit.iss
+          Copy-Item "dist\OrbitSetup-$v.exe" dist\Orbit-Windows-Setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/Orbit-Windows-Setup.exe
+
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install
+        run: python -m pip install -r requirements.txt pyinstaller
+      - name: Tests
+        run: python -m pytest -q tests
+      - name: Build Orbit.app
+        run: |
+          bash packaging/mac/build_app.sh
+          ditto -c -k --keepParent dist/Orbit.app dist/Orbit-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/Orbit-macOS.zip
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Release key (refuses to publish a debug-signed APK)
+        env:
+          KEYSTORE_B64: ${{ secrets.ORBIT_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::ORBIT_KEYSTORE_B64 secret missing"; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/orbit-release.jks"
+          echo "ORBIT_KEYSTORE=$RUNNER_TEMP/orbit-release.jks" >> "$GITHUB_ENV"
+      - name: Build APK
+        working-directory: android
+        env:
+          ORBIT_KEYSTORE_PASSWORD: ${{ secrets.ORBIT_KEYSTORE_PASSWORD }}
+          ORBIT_KEY_ALIAS: orbit
+          ORBIT_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          export ORBIT_VERSION="${VERSION#v}"
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../Orbit-Android.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: Orbit-Android.apk
+
+  release:
+    needs: [windows, macos, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${VERSION}"; [[ "$tag" == v* ]] || tag="v$tag"
+          ls -la out
+          gh release create "$tag" out/* --draft --title "Orbit ${tag}" --notes-file packaging/RELEASE_NOTES.md \
+            || gh release upload "$tag" out/* --clobber

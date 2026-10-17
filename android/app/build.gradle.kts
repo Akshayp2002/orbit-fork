@@ -1,8 +1,23 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// Release signing: a keystore outside the repo. Locally ~/.orbit-keys/signing.properties
+// (storeFile, storePassword, keyAlias, keyPassword); in CI the ORBIT_KEYSTORE* env vars.
+// Without either, release builds fall back to the debug key (fine for local testing,
+// but phones only accept updates signed with the same key, so publish with the real one).
+val signingProps = Properties().apply {
+    val f = file("${System.getProperty("user.home")}/.orbit-keys/signing.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+    System.getenv("ORBIT_KEYSTORE")?.let { setProperty("storeFile", it) }
+    System.getenv("ORBIT_KEYSTORE_PASSWORD")?.let { setProperty("storePassword", it); setProperty("keyPassword", it) }
+    System.getenv("ORBIT_KEY_ALIAS")?.let { setProperty("keyAlias", it) }
+}
+val hasReleaseKey = signingProps.getProperty("storeFile")?.let { file(it).exists() } == true
 
 android {
     namespace = "app.orbit.dial"
@@ -12,15 +27,24 @@ android {
         applicationId = "app.orbit.dial"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = (System.getenv("ORBIT_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("ORBIT_VERSION") ?: "0.1.0"
+    }
+
+    signingConfigs {
+        if (hasReleaseKey) create("release") {
+            storeFile = file(signingProps.getProperty("storeFile"))
+            storePassword = signingProps.getProperty("storePassword")
+            keyAlias = signingProps.getProperty("keyAlias", "orbit")
+            keyPassword = signingProps.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            signingConfig = signingConfigs.getByName("debug")   // sideload builds; Play needs a real key
+            signingConfig = signingConfigs.getByName(if (hasReleaseKey) "release" else "debug")
         }
     }
     compileOptions {

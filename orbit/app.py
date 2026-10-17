@@ -90,12 +90,19 @@ def tray_icon(accent: str) -> QIcon:
     return QIcon(pm)
 
 
+def self_args(argv: list[str]) -> list[str]:
+    """Arguments that start Orbit again: the packaged exe runs itself, a source checkout
+    runs `python -m orbit`."""
+    return list(argv) if getattr(sys, "frozen", False) else ["-m", "orbit", *argv]
+
+
 def parse_args(argv):
     ap = argparse.ArgumentParser(prog="orbit", description="Dial + wheel menu for CMF Buds Pro 2")
     ap.add_argument("--config", help="path to config.toml")
     ap.add_argument("--no-elevate", action="store_true", help="don't ask for admin (press-and-hold stays off)")
     ap.add_argument("--dev", action="store_true", help="accept injected events on udp 127.0.0.1:47800")
     ap.add_argument("--debug", action="store_true")
+    ap.add_argument("--autostart", choices=("on", "off"), help="start with Windows (packaged app, set by the installer)")
     return ap.parse_args(argv)
 
 
@@ -107,7 +114,7 @@ def main(argv=None):
     plat = get_platform()
     if not plat.is_elevated() and not args.no_elevate:
         log.info("asking for admin (needed to read press-and-hold)")
-        if plat.relaunch_elevated(["-m", "orbit", *argv]):
+        if plat.relaunch_elevated(self_args(argv)):
             return 0
         log.warning("elevation declined — continuing without press-and-hold")
 
@@ -218,7 +225,7 @@ def main(argv=None):
         shutdown()  # release the ETW session + lock before the new instance claims them
         import subprocess
         extra = [] if plat.is_elevated() or "--no-elevate" in argv else ["--no-elevate"]
-        subprocess.Popen([sys.executable, "-m", "orbit", *extra, *argv],
+        subprocess.Popen([sys.executable, *self_args([*extra, *argv])],
                          creationflags=0x08000000 if sys.platform == "win32" else 0)
         app.quit()
 
@@ -233,6 +240,16 @@ def main(argv=None):
             a.setChecked(svc.enabled)
             a.toggled.connect(lambda on, s=svc: setattr(s, "enabled", on))
             toggles.append(a)
+    if sys.platform == "win32":
+        from orbit.platform.windows import autostart
+        if autostart.available() and plat.is_elevated():
+            if args.autostart:
+                autostart.set_enabled(args.autostart == "on")
+            a_auto = QAction("Start with Windows")
+            a_auto.setCheckable(True)
+            a_auto.setChecked(autostart.enabled())
+            a_auto.toggled.connect(lambda on: autostart.set_enabled(on) or a_auto.setChecked(autostart.enabled()))
+            toggles.append(a_auto)
 
     for a in (a_wheel, a_settings, a_cfg, a_log, a_restart):
         menu.addAction(a)

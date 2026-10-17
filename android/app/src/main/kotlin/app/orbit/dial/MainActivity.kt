@@ -153,7 +153,16 @@ class MainActivity : ComponentActivity() {
                         OutlinedButton({ Orbit.emit(e.copy(source = "test")) }) { Text(l) }
                     }
                 }
-                Text("Log", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Log", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    TextButton({
+                        val cm = getSystemService(android.content.ClipboardManager::class.java)
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("Orbit log",
+                            "Orbit ${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE} · ${Build.MANUFACTURER} ${Build.MODEL}\n" +
+                                Orbit.logLines.value.joinToString("\n")))
+                        android.widget.Toast.makeText(this@MainActivity, "Log copied", android.widget.Toast.LENGTH_SHORT).show()
+                    }) { Text("Copy log") }
+                }
                 Column(Modifier.fillMaxWidth().background(Color(0xFF16181D), RoundedCornerShape(10.dp)).padding(10.dp)) {
                     (if (log.isEmpty()) listOf("(nothing yet)") else log.takeLast(18)).forEach {
                         Text(it, color = Color(0xCCFFFFFF), fontSize = 11.sp, fontFamily = FontFamily.Monospace)

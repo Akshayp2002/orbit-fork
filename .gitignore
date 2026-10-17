@@ -16,3 +16,7 @@ tools/calib/
 
 # Mac guided test output (screenshots, logs)
 mac_test_report/
+site/orbit.png
+build/
+dist/
+Orbit.spec

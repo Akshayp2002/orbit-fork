@@ -1,4 +1,62 @@
-# Orbit — a dial + wheel menu for CMF Buds Pro 2
+# Orbit
+
+**Turn the dial on your CMF Buds Pro 2 case into a controller for your computer and phone.**
+
+Double-press the dial to open a wheel of tools, turn to pick one, press to choose. Then the
+dial drives that tool: scroll pages and reels, flip slides, scrub a video timeline, change
+brightness, switch apps, undo / redo, take a photo, and more. Works on **Windows, macOS and
+Android**. Free and open source.
+
+> **You need CMF Buds Pro 2** (the case with the dial), paired to the device you install Orbit on.
+> Orbit reads the dial through the buds' own Bluetooth controls; other earbuds aren't supported.
+
+## Download
+
+Get the latest version from **[Releases](https://github.com/harsha20599/orbit/releases/latest)**:
+
+| | File | Install |
+|---|---|---|
+| **Windows 10 / 11** | `Orbit-Windows-Setup.exe` | Run it. Windows may say "Windows protected your PC": click **More info → Run anyway** (the app isn't code-signed yet). When Orbit starts it asks for admin: say yes, it's needed to read press-and-hold. |
+| **macOS 13+** (Apple Silicon) | `Orbit-macOS.zip` | Unzip, drag **Orbit.app** to Applications. The first time, **right-click → Open** (it isn't notarized yet). Allow **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). |
+| **Android 8+** | `Orbit-Android.apk` | Open it on the phone and allow installing from your browser. Then in Orbit, follow the setup checklist. If the Accessibility switch is greyed out: App info → ⋮ → **Allow restricted settings**. |
+
+## Using it
+
+| Do this | When a tool is active | When the wheel is open |
+|---|---|---|
+| **Turn** | drives the tool | moves the highlight |
+| **Press** | the tool's action (or play / pause) | choose it |
+| **Double press** | open the wheel | close |
+| **Triple press** | back to the previous tool | close |
+| **Hold** | Windows: Claude dictation · Android: open Claude | close |
+
+Everything is adjustable in **Settings** (tray / menu-bar icon → Settings…, or "Customize" in the
+Android app): which tools are on the wheel and in what order, what each press does (including
+"Open an app…"), your own keyboard-shortcut items, scroll speed, light / dark look.
+
+## Good to know
+
+- **Fast spins lose some clicks.** The buds send at most about three dial steps a second and
+  drop the rest, so Orbit makes fast turning go further to compensate. Slow clicks are exact.
+- **Each click makes a small tone in the buds.** That's the buds' firmware; Orbit can't turn it off.
+- **macOS shows its own volume slider** on each click. macOS doesn't let apps hide it.
+- **Press-and-hold** works on Windows (with admin) and Android; macOS doesn't pass it to apps.
+- **Privacy:** Orbit runs only on your device and sends nothing anywhere. On Android, its
+  accessibility service draws the wheel and performs the actions you pick; it reads only the
+  name of the app in front (for the app switcher) and, when you press with the Camera tool,
+  the camera app's buttons to find its shutter.
+
+## Help and feedback
+
+Found a bug or have an idea? **[Open an issue](https://github.com/harsha20599/orbit/issues/new/choose)**.
+Logs help a lot: tray / menu-bar icon → Open log (Windows `%LOCALAPPDATA%\Orbit\orbit.log`,
+macOS `~/.orbit/orbit.log`); on Android, copy the log from the bottom of the setup screen.
+
+---
+
+# For developers
+
+## Overview
 
 The case dial on the CMF Buds Pro 2 becomes a Surface-Dial-style controller on
 **Windows, macOS and Android**: **double-press** to open a wheel, **turn** to pick a
