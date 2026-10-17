@@ -94,6 +94,7 @@ class VolumeDial(
 
     fun onLevel(newLevel: Float, ours: Boolean, now: Long = Clock.now()) {
         var out: DialEvent? = null
+        var immediateRestore: Float? = null
         synchronized(this) {
             if (ours) { level = newLevel; return }
             val prev = level ?: run { level = newLevel; return }
@@ -116,7 +117,6 @@ class VolumeDial(
             // floor(+0.3): one click from an off-grid level stays 1
             val clicks = if (streamSteps != null) 1 else min(MAX_CLICKS, max(1, (abs(d) / step + 0.3f).toInt()))
             lastMove = now; lastDial = now
-            var immediateRestore: Float? = null
             if (!passthrough) {
                 if (streamSteps != null && home != null && abs(newLevel - home!!) >= 0.5f * step) {
                     val t = home!!
