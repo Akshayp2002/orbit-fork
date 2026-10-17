@@ -102,7 +102,7 @@ fun WheelOverlay(s: OverlayState) {
     val n = s.items.size.coerceAtLeast(1)
     val step = 360f / n
     val sel by animateFloatAsState(s.selSteps * step,
-        spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessMediumLow), label = "sel")
+        spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium), label = "sel")
     val shift = remember { Animatable(0f) }
 
     LaunchedEffect(s.openSeq) {

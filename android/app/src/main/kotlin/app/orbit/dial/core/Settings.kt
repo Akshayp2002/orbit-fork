@@ -79,6 +79,6 @@ data class OrbitSettings(
     fun buildEngine(actions: Actions, ui: Ui, rotation: RotationControl?, all: List<Tool>): Engine {
         val s = normalized(all)
         return Engine(actions, ui, rotation, all, s.defaultTool, s.globalGestures(), s.openWith(),
-                      wheelIds = s.wheel(all).map { it.id })
+                      duck = null, wheelIds = s.wheel(all).map { it.id })
     }
 }

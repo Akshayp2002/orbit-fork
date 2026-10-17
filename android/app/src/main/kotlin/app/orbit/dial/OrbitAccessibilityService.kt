@@ -39,9 +39,9 @@ import kotlin.math.sqrt
  */
 class OrbitAccessibilityService : AccessibilityService(), Actions {
     companion object {
-        const val SWIPE_MS = 130L
-        const val SWIPE_GAP_MS = 140L
-        const val MAX_QUEUED_SWIPES = 3
+        const val SWIPE_MS = 160L
+        const val SWIPE_GAP_MS = 250L
+        const val MAX_QUEUED_SWIPES = 2
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -154,8 +154,8 @@ class OrbitAccessibilityService : AccessibilityService(), Actions {
             if (dir > 0) { path.moveTo(right, y); path.lineTo(left, y) } else { path.moveTo(left, y); path.lineTo(right, y) }
         } else {
             val x = dm.widthPixels / 2f
-            val low = dm.heightPixels * 0.70f
-            val high = dm.heightPixels * 0.30f
+            val low = dm.heightPixels * 0.75f
+            val high = dm.heightPixels * 0.25f
             if (dir > 0) { path.moveTo(x, low); path.lineTo(x, high) } else { path.moveTo(x, high); path.lineTo(x, low) }
         }
         val done = object : GestureResultCallback() {

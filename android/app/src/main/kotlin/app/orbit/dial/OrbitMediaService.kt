@@ -76,7 +76,7 @@ class OrbitMediaService : Service() {
         lastIdx = idx
         val max = am.getStreamMaxVolume(stream).coerceAtLeast(1)
         val o = ourSet
-        val ours = o != null && o.first == idx && Clock.now() - o.second < 700
+        val ours = o != null && (o.first == idx || kotlin.math.abs(o.first - idx) <= 1) && Clock.now() - o.second < 1200
         Orbit.log("vol $idx/$max${if (ours) " (ours)" else ""}")
         if (!ours && (Orbit.phoneKeyRecently() || !dialOutputActive())) {
             dial.onLevel(idx.toFloat() / max, ours = true)        // not the dial: just track it

@@ -99,7 +99,7 @@ class VolumeDial(
             val prev = level ?: run { level = newLevel; return }
             val target = setTarget
             val fresh = target != null && now - setAt < STALE_MS
-            if (fresh && abs(newLevel - target!!) < CLICK_MIN * step) { level = newLevel; return }   // echo
+            if (fresh && abs(newLevel - target!!) < (if (streamSteps != null) 1.1f else CLICK_MIN) * step) { level = newLevel; return }   // echo
             var d = newLevel - prev
             if (fresh) {
                 val before = setBefore
@@ -117,8 +117,6 @@ class VolumeDial(
             val clicks = if (streamSteps != null) 1 else min(MAX_CLICKS, max(1, (abs(d) / step + 0.3f).toInt()))
             lastMove = now; lastDial = now
             if (!passthrough) {
-                val k = (newLevel * grid()).roundToInt()
-                if (k <= EDGE_STEPS || k >= grid() - EDGE_STEPS) lastMove = 0L    // at an end: recenter now
                 needRecenter = true
             }
             out = DialEvent(Kind.ROTATE, if (d > 0) clicks else -clicks, source, now)

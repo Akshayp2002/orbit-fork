@@ -24,7 +24,7 @@ class Engine(
     ),
     private val openWith: Set<Kind> = setOf(Kind.DOUBLE),
     private val dismissAfterMs: Long = 5000,
-    private val duck: Float = 0.5f,
+    private val duck: Float? = 0.5f,
     /** Items per report when spinning fast. Off (1): two deliberate clicks ~0.45 s apart
      *  look the same as a spin with dropped clicks, and 2 skipped items in real use. */
     private val wheelAccel: Int = 1,
